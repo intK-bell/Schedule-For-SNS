@@ -1,0 +1,11 @@
+{
+  "StageName": "prod",
+  "AppUrl": "https://s4s.aokigk.com",
+  "ThreadsClientId": "replace_me",
+  "ThreadsClientSecret": "replace_me",
+  "StripeSecretKey": "sk_live_replace_me",
+  "StripeWebhookSecret": "whsec_replace_me",
+  "StripePriceId": "price_replace_me",
+  "SessionSecret": "replace_with_long_random_secret"
+}
+

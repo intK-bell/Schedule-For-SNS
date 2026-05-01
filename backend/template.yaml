@@ -1,0 +1,291 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Schedule For SNS backend - API Gateway, Lambda, DynamoDB, EventBridge Scheduler
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+  AppUrl:
+    Type: String
+    Default: https://s4s.aokigk.com
+  ThreadsClientId:
+    Type: String
+    NoEcho: true
+  ThreadsClientSecret:
+    Type: String
+    NoEcho: true
+  StripeSecretKey:
+    Type: String
+    NoEcho: true
+  StripeWebhookSecret:
+    Type: String
+    NoEcho: true
+  StripePriceId:
+    Type: String
+  SessionSecret:
+    Type: String
+    NoEcho: true
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 20
+    MemorySize: 256
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        STAGE_NAME: !Ref StageName
+        APP_URL: !Ref AppUrl
+        USERS_TABLE: !Ref UsersTable
+        THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
+        SCHEDULED_POSTS_TABLE: !Ref ScheduledPostsTable
+        SUBSCRIPTIONS_TABLE: !Ref SubscriptionsTable
+        POST_ANALYTICS_TABLE: !Ref PostAnalyticsTable
+        TRIAL_ELIGIBILITY_TABLE: !Ref TrialEligibilityTable
+        STRIPE_EVENTS_TABLE: !Ref StripeEventsTable
+        ADMIN_SETTINGS_TABLE: !Ref AdminSettingsTable
+        ADMINS_TABLE: !Ref AdminsTable
+        THREADS_CLIENT_ID: !Ref ThreadsClientId
+        THREADS_CLIENT_SECRET: !Ref ThreadsClientSecret
+        STRIPE_SECRET_KEY: !Ref StripeSecretKey
+        STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
+        STRIPE_PRICE_ID: !Ref StripePriceId
+        SESSION_SECRET: !Ref SessionSecret
+
+Resources:
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref StageName
+      CorsConfiguration:
+        AllowCredentials: true
+        AllowHeaders:
+          - Content-Type
+          - Cookie
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowOrigins:
+          - !Ref AppUrl
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: handlers.api.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ThreadTokensTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScheduledPostsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SubscriptionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrialEligibilityTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref StripeEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminSettingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+              - scheduler:DeleteSchedule
+            Resource: "*"
+      Events:
+        Proxy:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+
+  PublishPostFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: handlers.publish_post.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScheduledPostsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ThreadTokensTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SubscriptionsTable
+
+  AnalyticsSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: handlers.analytics_sync.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PostAnalyticsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ScheduledPostsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ThreadTokensTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SubscriptionsTable
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: app_user_id
+          AttributeType: S
+        - AttributeName: threads_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: app_user_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: threads-user-id-index
+          KeySchema:
+            - AttributeName: threads_user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ThreadTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: app_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: app_user_id
+          KeyType: HASH
+
+  ScheduledPostsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: post_id
+          AttributeType: S
+        - AttributeName: app_user_id
+          AttributeType: S
+        - AttributeName: scheduled_date
+          AttributeType: S
+      KeySchema:
+        - AttributeName: post_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: user-date-index
+          KeySchema:
+            - AttributeName: app_user_id
+              KeyType: HASH
+            - AttributeName: scheduled_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  SubscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: app_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: app_user_id
+          KeyType: HASH
+
+  PostAnalyticsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: post_id
+          AttributeType: S
+        - AttributeName: analytics_stage
+          AttributeType: S
+      KeySchema:
+        - AttributeName: post_id
+          KeyType: HASH
+        - AttributeName: analytics_stage
+          KeyType: RANGE
+
+  TrialEligibilityTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: trial_key_hash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: trial_key_hash
+          KeyType: HASH
+
+  StripeEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: stripe_event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: stripe_event_id
+          KeyType: HASH
+
+  AdminSettingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: setting_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: setting_key
+          KeyType: HASH
+
+  AdminsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: admin_threads_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: admin_threads_user_id
+          KeyType: HASH
+
+Outputs:
+  ApiUrl:
+    Description: HTTP API endpoint
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
