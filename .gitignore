@@ -10,3 +10,4 @@ backend/env/prod.json
 *.pyc
 __pycache__/
 .DS_Store
+backend/samconfig.toml
