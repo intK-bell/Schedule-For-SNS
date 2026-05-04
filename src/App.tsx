@@ -18,7 +18,7 @@ import {
   Trash2,
   XCircle
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 
 type View = "calendar" | "posts" | "analytics" | "settings";
 type PostStatus = "scheduled" | "posted" | "failed" | "canceled";
@@ -95,6 +95,11 @@ const statusMeta: Record<PostStatus, { label: string; icon: typeof Clock3; tone:
 };
 
 function App() {
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+
+  const handleThreadsLogin = () => {
+  window.location.href = `${apiBaseUrl}/auth/threads/start`;
+  };
   const [view, setView] = useState<View>("calendar");
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
@@ -135,6 +140,20 @@ function App() {
 
   const engagement = analytics.likes + analytics.replies + analytics.reposts + analytics.quotes + analytics.shares;
   const isBlocked = userStatus !== "active" || needsReconnect;
+  
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    fetch(`${apiBaseUrl}/me`, {
+      credentials: "include"
+    })
+      .then((res) => {
+        setIsLoggedIn(res.ok);
+      })
+      .catch(() => {
+        setIsLoggedIn(false);
+      });
+  }, [apiBaseUrl]);
 
   function resetDraft() {
     setDraft({
@@ -210,6 +229,27 @@ function App() {
     setView("calendar");
   }
 
+  if (isLoggedIn === null) {
+    return <div>Loading...</div>;
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <h1>Schedule For SNS</h1>
+          <p>Threadsの投稿を、カレンダーからかんたんに予約できます。</p>
+  
+          <button className="button primary" onClick={handleThreadsLogin}>
+            Threadsでログイン
+          </button>
+  
+          <p className="muted-text">14日間無料。その後は税込390円/月。</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -257,6 +297,9 @@ function App() {
             <h1>{viewTitle(view)}</h1>
           </div>
           <div className="topbar-actions">
+          <button onClick={handleThreadsLogin}>
+            Threadsでログイン
+          </button>
             <select aria-label="表示言語" defaultValue="ja">
               {localeLabels.map((locale) => (
                 <option key={locale.code} value={locale.code}>
