@@ -3,6 +3,7 @@ import urllib.parse
 from http import HTTPStatus
 import urllib.request
 import json
+import secrets
 
 from handlers.common import app_url, redirect, request_method, request_path, response
 
@@ -85,10 +86,19 @@ def handler(event, context):
 
                     user_id = user_body.get("id")
 
-                return response(200, {
-                    "access_token": access_token,
-                    "user_id": user_id
+                session_id = secrets.token_urlsafe(32)
+
+                print("LOGIN SUCCESS", {
+                    "user_id": user_id,
+                    "session_id": session_id,
                 })
+
+                return redirect(
+                    app_url("/"),
+                    cookies=[
+                        f"session={session_id}; HttpOnly; Secure; Path=/; SameSite=None"
+                    ],
+                )
 
         except Exception as e:
             error_body = ""
@@ -106,6 +116,16 @@ def handler(event, context):
         return response(HTTPStatus.OK, {"ok": True})
 
     if method == "GET" and path == "/me":
+        cookies = event.get("cookies") or []
+
+        session_id = None
+        for cookie in cookies:
+            if cookie.startswith("session="):
+                session_id = cookie.split("=", 1)[1]
+
+        if not session_id:
+            return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
         return response(
             HTTPStatus.OK,
             {
