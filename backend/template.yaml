@@ -91,6 +91,7 @@ Resources:
           - OPTIONS
         AllowOrigins:
           - !Ref AppUrl
+          - http://localhost:5173
 
   ApiFunction:
     Type: AWS::Serverless::Function

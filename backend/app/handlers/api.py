@@ -7,6 +7,17 @@ import secrets
 
 from handlers.common import app_url, redirect, request_method, request_path, response
 
+ALLOWED_RETURN_TO = [
+    "http://localhost:5173",
+    "https://dev.dbbr2u09r9szv.amplifyapp.com",
+    "https://s4s.aokigk.com",
+]
+
+def safe_return_to(value: str | None) -> str:
+    if value in ALLOWED_RETURN_TO:
+        return value
+    return app_url("/")
+
 def handler(event, context):
     method = request_method(event)
     path = request_path(event)
@@ -23,12 +34,15 @@ def handler(event, context):
         client_id = os.environ["THREADS_CLIENT_ID"]
         redirect_uri = "https://api-dev.s4s.aokigk.com/auth/threads/callback"
 
+        query = event.get("queryStringParameters") or {}
+        return_to = safe_return_to(query.get("return_to"))
+
         params = {
             "client_id": client_id,
             "redirect_uri": redirect_uri,
             "scope": "threads_basic,threads_content_publish,threads_manage_insights",
             "response_type": "code",
-            "state": "dev",
+            "state": return_to,
         }
 
         threads_auth_url = "https://threads.net/oauth/authorize?" + urllib.parse.urlencode(params)
@@ -93,8 +107,10 @@ def handler(event, context):
                     "session_id": session_id,
                 })
 
+                return_to = safe_return_to(query.get("state"))
+
                 return redirect(
-                    app_url("/"),
+                    return_to,
                     cookies=[
                         f"session={session_id}; HttpOnly; Secure; Path=/; SameSite=None"
                     ],
