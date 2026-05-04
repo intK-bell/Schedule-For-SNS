@@ -98,8 +98,12 @@ function App() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
   const handleThreadsLogin = () => {
-  window.location.href = `${apiBaseUrl}/auth/threads/start`;
+    const returnTo = window.location.origin;
+  
+    window.location.href =
+      `${apiBaseUrl}/auth/threads/start?return_to=${encodeURIComponent(returnTo)}`;
   };
+
   const handleLogout = () => {
     fetch(`${apiBaseUrl}/auth/logout`, {
       method: "POST",
@@ -108,6 +112,7 @@ function App() {
       window.location.reload();
     });
   };
+
   const [view, setView] = useState<View>("calendar");
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
@@ -305,12 +310,6 @@ function App() {
             <h1>{viewTitle(view)}</h1>
           </div>
           <div className="topbar-actions">
-          <button onClick={handleThreadsLogin}>
-            Threadsでログイン
-          </button>
-          <button onClick={handleLogout}>
-            ログアウト
-          </button>
             <select aria-label="表示言語" defaultValue="ja">
               {localeLabels.map((locale) => (
                 <option key={locale.code} value={locale.code}>
@@ -318,9 +317,13 @@ function App() {
                 </option>
               ))}
             </select>
-            <button className="icon-button" title="ログアウト">
-              <LogOut size={18} />
-            </button>
+          <button
+            className="icon-button"
+            title="ログアウト"
+            onClick={handleLogout}
+          >
+            <LogOut size={18} />
+          </button>
           </div>
         </header>
 
