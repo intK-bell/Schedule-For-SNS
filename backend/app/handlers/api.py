@@ -113,7 +113,13 @@ def handler(event, context):
             })
         
     if method == "POST" and path == "/auth/logout":
-        return response(HTTPStatus.OK, {"ok": True})
+        return response(
+            HTTPStatus.OK,
+            {"ok": True},
+            headers={
+                "Set-Cookie": "session=; HttpOnly; Secure; Path=/; Max-Age=0; SameSite=None"
+            },
+        )
 
     if method == "GET" and path == "/me":
         cookies = event.get("cookies") or []
