@@ -36,8 +36,16 @@ def app_url(path: str = "") -> str:
 
 
 def request_path(event: dict[str, Any]) -> str:
-    return event.get("rawPath") or event.get("path") or "/"
+    path = event.get("rawPath") or event.get("path") or "/"
+    stage = event.get("requestContext", {}).get("stage")
 
+    if stage and path.startswith(f"/{stage}/"):
+        path = path[len(stage) + 1:]
+
+    if stage and path == f"/{stage}":
+        path = "/"
+
+    return path
 
 def request_method(event: dict[str, Any]) -> str:
     return event.get("requestContext", {}).get("http", {}).get("method", "GET").upper()

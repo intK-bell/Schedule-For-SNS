@@ -29,6 +29,16 @@ Parameters:
   SessionSecret:
     Type: String
     NoEcho: true
+  ApiDomainName:
+    Type: String
+    Description: Custom domain name for API Gateway
+    Default: api-dev.s4s.aokigk.com
+  ApiCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for API custom domain
+  HostedZoneId:
+    Type: String
+    Description: Route 53 Hosted Zone ID for aokigk.com
 
 Globals:
   Function:
@@ -62,6 +72,12 @@ Resources:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref StageName
+      Domain:
+        DomainName: !Ref ApiDomainName
+        CertificateArn: !Ref ApiCertificateArn
+        EndpointConfiguration: REGIONAL
+        Route53:
+          HostedZoneId: !Ref HostedZoneId
       CorsConfiguration:
         AllowCredentials: true
         AllowHeaders:
@@ -289,3 +305,6 @@ Outputs:
   ApiUrl:
     Description: HTTP API endpoint
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  CustomApiUrl:
+    Description: Custom API endpoint
+    Value: !Sub "https://${ApiDomainName}"
