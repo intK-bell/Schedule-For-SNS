@@ -100,6 +100,14 @@ function App() {
   const handleThreadsLogin = () => {
   window.location.href = `${apiBaseUrl}/auth/threads/start`;
   };
+  const handleLogout = () => {
+    fetch(`${apiBaseUrl}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+    }).then(() => {
+      window.location.reload();
+    });
+  };
   const [view, setView] = useState<View>("calendar");
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
@@ -299,6 +307,9 @@ function App() {
           <div className="topbar-actions">
           <button onClick={handleThreadsLogin}>
             Threadsでログイン
+          </button>
+          <button onClick={handleLogout}>
+            ログアウト
           </button>
             <select aria-label="表示言語" defaultValue="ja">
               {localeLabels.map((locale) => (
