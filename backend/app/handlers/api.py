@@ -354,23 +354,37 @@ def handler(event, context):
         )
 
     if method == "GET" and path == "/me":
-        cookies = event.get("cookies") or []
-
-        session_id = None
-        for cookie in cookies:
-            if cookie.startswith("session="):
-                session_id = cookie.split("=", 1)[1]
+        session_id = get_cookie(event, "session")
 
         if not session_id:
             return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
 
+        session_res = sessions_table.get_item(Key={"session_id": session_id})
+        session = session_res.get("Item")
+
+        if not session:
+            return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
+        token_res = thread_tokens_table.get_item(
+            Key={"threads_user_id": session["threads_user_id"]}
+        )
+
+        token = token_res.get("Item")
+
+        reauth_required = False
+
+        if not token:
+            reauth_required = True
+        elif token.get("reauth_required") is True:
+            reauth_required = True
+
         return response(
             HTTPStatus.OK,
             {
-                "app_user_id": "demo",
+                "app_user_id": session["threads_user_id"],
                 "user_status": "active",
                 "subscription_status": "trialing",
-                "reauth_required": False,
+                "reauth_required": reauth_required,
             },
         )
     

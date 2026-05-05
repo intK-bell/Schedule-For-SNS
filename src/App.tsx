@@ -651,23 +651,19 @@ function CalendarView({
         </div>
         <div className="month-controls">
           <label>
-            年
-            <select value={year} onChange={(event) => setVisibleMonth(`${event.target.value}-${month}`)}>
-              {[2026, 2027, 2028].map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            月
-            <select value={month} onChange={(event) => setVisibleMonth(`${year}-${event.target.value}`)}>
-              {Array.from({ length: 12 }, (_, index) => `${index + 1}`.padStart(2, "0")).map((value) => (
-                <option key={value} value={value}>
-                  {Number(value)}月
-                </option>
-              ))}
+            表示月
+            <select
+              value={visibleMonth}
+              onChange={(event) => setVisibleMonth(event.target.value)}
+            >
+              {buildReservableMonths().map((value) => {
+                const [y, m] = value.split("-");
+                return (
+                  <option key={value} value={value}>
+                    {y}年{Number(m)}月
+                  </option>
+                );
+              })}
             </select>
           </label>
         </div>
@@ -837,6 +833,26 @@ function PostsView({
       </div>
     </section>
   );
+}
+
+function buildReservableMonths() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const maxDate = new Date(today);
+  maxDate.setDate(today.getDate() + 30);
+
+  const months: string[] = [];
+  const cursor = new Date(today.getFullYear(), today.getMonth(), 1);
+
+  while (cursor <= maxDate) {
+    const year = cursor.getFullYear();
+    const month = `${cursor.getMonth() + 1}`.padStart(2, "0");
+    months.push(`${year}-${month}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return months;
 }
 
 function buildMonthDates(month: string) {
