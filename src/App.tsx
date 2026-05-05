@@ -354,10 +354,26 @@ function App() {
     alert(editingId ? "予約を更新しました！" : "予約しました！");
   }
 
-  function deletePost(id: string) {
-    setPosts((current) =>
-      current.map((post) => (post.id === id && post.status === "scheduled" ? { ...post, status: "canceled" } : post))
-    );
+  async function deletePost(id: string) {
+    const confirmed = window.confirm("この予約投稿を削除しますか？");
+  
+    if (!confirmed) {
+      return;
+    }
+  
+    const res = await fetch(`${apiBaseUrl}/scheduled-posts/${id}`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+  
+    const data = await res.json();
+  
+    if (!res.ok) {
+      alert(data.message ?? "削除に失敗しました");
+      return;
+    }
+  
+    setPosts((current) => current.filter((post) => post.id !== id));
   }
 
   function cloneFailed(post: ScheduledPost) {

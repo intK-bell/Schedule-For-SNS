@@ -491,6 +491,51 @@ def handler(event, context):
                 "message": "Schedule update failed",
                 "detail": str(e),
             })
+        
+    if method == "DELETE" and path.startswith("/scheduled-posts/"):
+        try:
+            post_id = path.split("/")[-1]
+
+            session_id = get_cookie(event, "session")
+
+            if not session_id:
+                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
+            session_res = sessions_table.get_item(Key={"session_id": session_id})
+            session = session_res.get("Item")
+
+            if not session:
+                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
+            scheduled_posts_table.delete_item(
+                Key={"post_id": post_id},
+                ConditionExpression="threads_user_id = :uid AND #status = :scheduled",
+                ExpressionAttributeNames={
+                    "#status": "status",
+                },
+                ExpressionAttributeValues={
+                    ":uid": session["threads_user_id"],
+                    ":scheduled": "scheduled",
+                },
+            )
+
+            return response(HTTPStatus.OK, {
+                "ok": True,
+                "post_id": post_id,
+            })
+
+        except scheduled_posts_table.meta.client.exceptions.ConditionalCheckFailedException:
+            return response(
+                HTTPStatus.BAD_REQUEST,
+                {"message": "削除できる予約が見つからないか、すでに投稿済みです"},
+            )
+
+        except Exception as e:
+            print("SCHEDULE DELETE ERROR", repr(e))
+            return response(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                "message": "Schedule delete failed",
+                "detail": str(e),
+            })
     
     if method == "GET" and path == "/scheduled-posts":
         try:
@@ -519,8 +564,21 @@ def handler(event, context):
                 reverse=True,
             )
 
+            normalized_items = []
+            for item in items:
+                normalized_items.append({
+                    "post_id": item["post_id"],
+                    "threads_user_id": item["threads_user_id"],
+                    "content": item["content"],
+                    "scheduled_at": item["scheduled_at"],
+                    "timezone": item.get("timezone", "Asia/Tokyo"),
+                    "status": item.get("status", "scheduled"),
+                    "created_at": int(item.get("created_at", 0)),
+                    "updated_at": int(item.get("updated_at", 0)),
+                })
+
             return response(HTTPStatus.OK, {
-                "items": items,
+                "items": normalized_items,
             })
 
         except Exception as e:
