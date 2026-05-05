@@ -414,6 +414,9 @@ def handler(event, context):
                 user_timezone=user_timezone,
             )
 
+            if day_count >= 3:
+                return response(400, {"message": "1日3件までです"})
+
             if day_count >= DAILY_SCHEDULE_LIMIT:
                 return response(
                     HTTPStatus.BAD_REQUEST,
@@ -499,6 +502,9 @@ def handler(event, context):
                 user_timezone=user_timezone,
                 exclude_post_id=post_id,
             )
+
+            if day_count >= 3:
+                return response(400, {"message": "1日3件までです"})
 
             if day_count >= DAILY_SCHEDULE_LIMIT:
                 return response(
