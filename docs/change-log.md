@@ -184,6 +184,17 @@ Threads投稿処理（コンテナ作成 → 公開）を実装
 DynamoDB ScheduledPostsTable を利用した予約保存API /scheduled-posts を実装  
 予約投稿データの保存（status=scheduled）を実装  
 
+予約投稿一覧取得API GET /scheduled-posts を実装  
+DynamoDBからユーザー単位で予約データを取得する処理を追加  
+Decimal型によるJSONシリアライズエラー対策として数値をintへ変換  
+
+予約投稿削除API DELETE /scheduled-posts/{post_id} を実装  
+threads_user_id および status 条件付きで安全に削除する処理を追加  
+
+フロントエンドで予約投稿一覧をAPI連携へ変更  
+サンプルデータを廃止し、DynamoDBの実データ表示へ移行  
+ログイン後に予約一覧を自動取得する処理を追加  
+
 予約時刻のバリデーションを追加  
 過去日時の投稿を禁止  
 現在時刻から5分以内の投稿を禁止  
@@ -207,6 +218,9 @@ APIの timezone 変数名衝突を修正（文字列と datetime.timezone の衝
 /scheduled-posts に例外ハンドリングを追加し、エラー詳細をレスポンスに出力  
 
 ### 修正（不具合対応）
+/scheduled-posts GET APIにてDecimal型がJSONシリアライズできず500エラーとなる問題を修正  
+→ created_at / updated_at をintへ変換することで対応  
+
 /scheduled-posts APIにおいて更新処理が存在せず、常に新規作成される問題を確認  
 post_id を毎回新規生成していたため、既存データが上書きされない設計となっていた  
 
@@ -227,11 +241,15 @@ Threads投稿APIにより実際に投稿されることを確認
 CORSプリフライト（OPTIONS）が正常に通過することを確認  
 
 /scheduled-posts APIで予約データがDynamoDBに保存されることを確認  
-5分以内の投稿予約がバリデーションで拒否されることを確認  
+GET APIにより保存データが取得できることを確認  
+DELETE APIにより予約が削除されることを確認  
 
+5分以内の投稿予約がバリデーションで拒否されることを確認  
 フロントエンドのタイムゾーン依存で正しい時刻が保存されることを確認  
 
 ### 未解決・次回対応
+1日3件制限の実装  
+
 ThreadsアクセストークンのKMS暗号化保存  
 長期トークンへの交換処理  
 ユーザーテーブル（users）への保存  
@@ -239,7 +257,7 @@ ThreadsアクセストークンのKMS暗号化保存
 EventBridge Schedulerによる予約投稿実行処理  
 publish_post.py の本実装（投稿実行＋ステータス更新）  
 
-投稿履歴一覧のAPI連携（scheduled_posts GET）  
+投稿履歴一覧のAPI連携  
 投稿失敗時のエラーハンドリング強化  
 投稿APIのレート制限対応  
 

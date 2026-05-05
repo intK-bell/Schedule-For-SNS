@@ -167,8 +167,18 @@ function App() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const selectedPosts = posts.filter((post) => post.date === selectedDate && post.status === "scheduled");
-  const remainingSlots = Math.max(0, 3 - selectedPosts.length);
+  const selectedPosts = posts.filter(
+    (post) => post.date === selectedDate && post.status === "scheduled"
+  );
+  
+  const targetDatePosts = posts.filter(
+    (post) =>
+      post.date === draft.date &&
+      post.status === "scheduled" &&
+      post.id !== editingId
+  );
+  
+  const remainingSlots = Math.max(0, 3 - targetDatePosts.length);
   const activePosts = posts.filter((post) => post.status === "scheduled");
   const postedPosts = posts.filter((post) => post.status === "posted");
 

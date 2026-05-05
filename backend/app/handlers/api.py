@@ -7,7 +7,9 @@ import secrets
 import time
 import boto3
 import stripe
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+from boto3.dynamodb.conditions import Attr
 
 from handlers.common import app_url, redirect, request_method, request_path, response
 
@@ -85,6 +87,48 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         publish_body = json.loads(res.read())
 
     return publish_body
+
+DAILY_SCHEDULE_LIMIT = 3
+
+def local_day_utc_range(scheduled_dt: datetime, user_timezone: str) -> tuple[str, str]:
+    try:
+        tz = ZoneInfo(user_timezone)
+    except Exception:
+        tz = ZoneInfo("Asia/Tokyo")
+
+    local_dt = scheduled_dt.astimezone(tz)
+    local_day_start = local_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    local_day_end = local_day_start + timedelta(days=1)
+
+    utc_start = local_day_start.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    utc_end = local_day_end.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    return utc_start, utc_end
+
+
+def count_scheduled_posts_on_day(
+    threads_user_id: str,
+    scheduled_dt: datetime,
+    user_timezone: str,
+    exclude_post_id: str | None = None,
+) -> int:
+    day_start, day_end = local_day_utc_range(scheduled_dt, user_timezone)
+
+    filter_expression = (
+        Attr("threads_user_id").eq(threads_user_id)
+        & Attr("status").eq("scheduled")
+        & Attr("scheduled_at").gte(day_start)
+        & Attr("scheduled_at").lt(day_end)
+    )
+
+    if exclude_post_id:
+        filter_expression = filter_expression & Attr("post_id").ne(exclude_post_id)
+
+    scan_res = scheduled_posts_table.scan(
+        FilterExpression=filter_expression,
+    )
+
+    return len(scan_res.get("Items", []))
 
 def handler(event, context):
     method = request_method(event)
@@ -363,6 +407,18 @@ def handler(event, context):
                     HTTPStatus.BAD_REQUEST,
                     {"message": "Reservation must be at least 5 minutes later"},
                 )
+            
+            day_count = count_scheduled_posts_on_day(
+                threads_user_id=session["threads_user_id"],
+                scheduled_dt=scheduled_dt,
+                user_timezone=user_timezone,
+            )
+
+            if day_count >= DAILY_SCHEDULE_LIMIT:
+                return response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"message": "この日は予約上限の3件に達しています"},
+                )
 
             post_id = secrets.token_urlsafe(16)
             now = int(time.time())
@@ -435,6 +491,19 @@ def handler(event, context):
                 return response(
                     HTTPStatus.BAD_REQUEST,
                     {"message": "Reservation must be at least 5 minutes later"},
+                )
+            
+            day_count = count_scheduled_posts_on_day(
+                threads_user_id=session["threads_user_id"],
+                scheduled_dt=scheduled_dt,
+                user_timezone=user_timezone,
+                exclude_post_id=post_id,
+            )
+
+            if day_count >= DAILY_SCHEDULE_LIMIT:
+                return response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"message": "この日は予約上限の3件に達しています"},
                 )
 
             now = int(time.time())
