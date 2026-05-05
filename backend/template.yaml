@@ -66,6 +66,7 @@ Globals:
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         STRIPE_PRICE_ID: !Ref StripePriceId
         SESSION_SECRET: !Ref SessionSecret
+        SESSIONS_TABLE: !Ref SessionsTable
 
 Resources:
   HttpApi:
@@ -83,6 +84,7 @@ Resources:
         AllowHeaders:
           - Content-Type
           - Cookie
+          - Authorization
         AllowMethods:
           - GET
           - POST
@@ -115,6 +117,8 @@ Resources:
             TableName: !Ref AdminSettingsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AdminsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
         - Statement:
             Effect: Allow
             Action:
@@ -301,6 +305,22 @@ Resources:
       KeySchema:
         - AttributeName: admin_threads_user_id
           KeyType: HASH
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
 
 Outputs:
   ApiUrl:
