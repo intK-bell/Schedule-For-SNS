@@ -113,17 +113,55 @@ function App() {
     });
   };
 
+  const handleTestPost = async () => {
+    const text = draft.content.trim();
+  
+    if (!text) {
+      alert("投稿本文を入力してください");
+      return;
+    }
+  
+    const res = await fetch(`${apiBaseUrl}/threads/test-post`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text }),
+    });
+  
+    const data = await res.json();
+    console.log("POST RESULT", data);
+  
+    alert(res.ok ? "投稿成功！" : "投稿失敗…");
+  };
+
   const [view, setView] = useState<View>("calendar");
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
-  const [needsReconnect, setNeedsReconnect] = useState(true);
-  const [selectedDate, setSelectedDate] = useState("2026-05-02");
-  const [visibleMonth, setVisibleMonth] = useState("2026-05");
+  const [needsReconnect, setNeedsReconnect] = useState(false);
+  const userTimezone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
+
+  const defaultDateTime = new Date();
+  defaultDateTime.setMinutes(defaultDateTime.getMinutes() + 10);
+
+  const today = defaultDateTime.toLocaleDateString("sv-SE");
+  const currentTime = defaultDateTime.toLocaleTimeString("sv-SE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const currentMonth = today.slice(0, 7);
+
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [visibleMonth, setVisibleMonth] = useState(currentMonth);
+
   const [posts, setPosts] = useState(initialPosts);
   const [draft, setDraft] = useState({
-    date: "2026-05-02",
-    time: "10:00",
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo",
+    date: today,
+    time: currentTime,
+    timezone: userTimezone,
     content: ""
   });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -158,10 +196,21 @@ function App() {
 
   useEffect(() => {
     fetch(`${apiBaseUrl}/me`, {
-      credentials: "include"
+      credentials: "include",
     })
-      .then((res) => {
-        setIsLoggedIn(res.ok);
+      .then(async (res) => {
+        if (!res.ok) {
+          setIsLoggedIn(false);
+          return;
+        }
+  
+        const data = await res.json();
+        setIsLoggedIn(true);
+  
+        console.log("ME RESULT", data);
+
+        setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
+        setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
       })
       .catch(() => {
         setIsLoggedIn(false);
@@ -169,14 +218,22 @@ function App() {
   }, [apiBaseUrl]);
 
   function resetDraft() {
+    const nextDateTime = new Date();
+    nextDateTime.setMinutes(nextDateTime.getMinutes() + 10);
+
+    const nextDate = nextDateTime.toLocaleDateString("sv-SE");
+    const nextTime = nextDateTime.toLocaleTimeString("sv-SE", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+
     setDraft({
-      date: selectedDate,
-      time: "10:00",
-      timezone: draft.timezone,
+      date: nextDate,
+      time: nextTime,
+      timezone: userTimezone,
       content: ""
     });
-    setEditingId(null);
-    setShowConfirm(false);
   }
 
   function beginEdit(post: ScheduledPost) {
@@ -190,19 +247,54 @@ function App() {
     setView("calendar");
   }
 
-  function saveDraft() {
-    if (!draft.content.trim()) return;
+  async function saveDraft() {
+    if (!draft.content.trim()) {
+      alert("投稿本文を入力してください");
+      return;
+    }
+  
+    const scheduledAt = new Date(`${draft.date}T${draft.time}:00`).toISOString();
+  
+    const url = editingId
+      ? `${apiBaseUrl}/scheduled-posts/${editingId}`
+      : `${apiBaseUrl}/scheduled-posts`;
 
+    const method = editingId ? "PUT" : "POST";
+
+    const res = await fetch(url, {
+      method,
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        content: draft.content.trim(),
+        scheduled_at: scheduledAt,
+        timezone: draft.timezone,
+      }),
+    });
+  
+    const data = await res.json();
+    console.log("SCHEDULE RESULT", data);
+  
+    if (!res.ok) {
+      alert(data.message || "予約に失敗しました");
+      return;
+    }
+  
+    const saved = data.post;
+  
     if (editingId) {
       setPosts((current) =>
         current.map((post) =>
           post.id === editingId
             ? {
                 ...post,
-                content: draft.content.trim(),
+                content: saved.content,
                 date: draft.date,
                 time: draft.time,
-                timezone: draft.timezone
+                timezone: saved.timezone,
+                status: "scheduled",
               }
             : post
         )
@@ -210,19 +302,22 @@ function App() {
     } else {
       setPosts((current) => [
         {
-          id: `post-${current.length + 1}`.padStart(8, "0"),
-          content: draft.content.trim(),
+          id: saved.post_id,
+          content: saved.content,
           date: draft.date,
           time: draft.time,
-          timezone: draft.timezone,
-          status: "scheduled"
+          timezone: saved.timezone,
+          status: "scheduled",
         },
-        ...current
+        ...current,
       ]);
     }
-
+  
     setSelectedDate(draft.date);
+    setEditingId(null);
+    setShowConfirm(false);
     resetDraft();
+    alert(editingId ? "予約を更新しました！" : "予約しました！");
   }
 
   function deletePost(id: string) {
@@ -324,6 +419,14 @@ function App() {
           >
             <LogOut size={18} />
           </button>
+
+          {/* <button
+            className="icon-button"
+            title="テスト投稿"
+            onClick={handleTestPost}
+          >
+            投稿テスト
+          </button> */}
           </div>
         </header>
 
@@ -463,8 +566,18 @@ function CalendarView({
   const dates = useMemo(() => buildMonthDates(visibleMonth), [visibleMonth]);
   const [year, month] = visibleMonth.split("-");
   const isFull = remainingSlots === 0 && !editingId;
-  const canSubmit = !isBlocked && !isFull && draft.content.trim().length > 0;
+  const isContentEmpty = draft.content.trim().length === 0;
+  const isDateTimeMissing = !draft.date || !draft.time;
 
+  const submitDisabledReason = (() => {
+    if (isBlocked) return "現在は予約できません";
+    if (isFull) return "この日は予約上限の3件に達しています";
+    if (isDateTimeMissing) return "投稿日時を選択してください";
+    if (isContentEmpty) return "投稿本文を入力してください";
+    return "";
+  })();
+
+  const canSubmit = submitDisabledReason === "";
   return (
     <div className="workspace-grid">
       <section className="panel calendar-panel">
@@ -571,10 +684,19 @@ function CalendarView({
         </div>
         <div className="composer-footer">
           <span>{draft.content.length}/500</span>
-          <button className="button primary" disabled={!canSubmit} onClick={() => setShowConfirm(true)}>
-            {editingId ? <Edit3 size={16} /> : <Plus size={16} />}
-            {editingId ? "編集内容を確認" : "予約内容を確認"}
+          <button
+            className="button primary"
+            disabled={!canSubmit}
+            onClick={() => setShowConfirm(true)}
+            title={submitDisabledReason || "予約内容を確認します"}
+          >
+            予約内容を確認
           </button>
+          {!canSubmit && (
+            <p className="form-hint error">
+              {submitDisabledReason}
+            </p>
+          )}
         </div>
       </section>
     </div>

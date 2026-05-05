@@ -147,3 +147,100 @@
 - Amplify managed certificateを使ったカスタムドメイン設定手順を整理
 - SPA rewrite設定を整理
 - Amplify環境変数とMeta/Stripeへ反映するURLを整理
+
+## 2026-05-05 JST
+
+### 追加
+Threads OAuthログインを実装  
+/auth/threads/start で認可URLへリダイレクト  
+/auth/threads/callback で認可コードをアクセストークンへ交換  
+Threads user_id取得処理を追加  
+
+HttpOnly Cookieによるセッション管理を実装  
+ログイン後に元の画面へ戻る return_to 制御を追加（local/dev/prod対応）  
+ログアウトAPI /auth/logout を実装  
+
+フロントエンドにログイン状態判定（/me）を追加  
+フロントエンドにログアウトボタンを追加  
+
+Amplify環境変数に VITE_API_BASE_URL を追加  
+ローカル環境（localhost）でのログインフローを対応  
+
+DynamoDB SessionsTable を追加  
+session_id をキーとしたセッション管理  
+TTL（expires_at）設定  
+Point-in-Time Recovery有効化  
+
+ログイン時に session_id → threads_user_id をDynamoDBへ保存  
+/me APIをDynamoDB参照に変更し、本物の認証判定を実装  
+ログアウト時にDynamoDBからセッション削除処理を追加  
+
+Threadsアクセストークンをセッションへ保存（暫定・未暗号化）  
+
+Threads投稿テストAPI /threads/test-post を追加  
+Threads投稿処理（コンテナ作成 → 公開）を実装  
+フロントエンドにテスト投稿ボタンを追加  
+
+DynamoDB ScheduledPostsTable を利用した予約保存API /scheduled-posts を実装  
+予約投稿データの保存（status=scheduled）を実装  
+
+予約時刻のバリデーションを追加  
+過去日時の投稿を禁止  
+現在時刻から5分以内の投稿を禁止  
+
+フロントエンドでユーザーのタイムゾーンを取得し送信する処理を追加  
+予約初期値を現在時刻＋10分に設定  
+
+### 変更
+認証フローを仮実装から本実装へ変更（Cookie + DynamoDBセッション）  
+/me の挙動を固定レスポンスからセッションベースへ変更  
+ログイン後のリダイレクト先を APP_URL 固定から動的制御へ変更  
+
+API Gateway CORS設定に http://localhost:5173 を追加  
+LambdaでOPTIONSリクエスト（CORSプリフライト）を明示的に処理するように変更  
+Access-Control-Allow-Headers の設定不備を修正（YAMLインデント不備対応）  
+
+フロントエンドの投稿ボタンをテスト投稿APIから予約保存APIへ接続準備  
+予約ボタンの活性条件を整理（本文・日時・上限・ステータス）  
+
+APIの timezone 変数名衝突を修正（文字列と datetime.timezone の衝突回避）  
+/scheduled-posts に例外ハンドリングを追加し、エラー詳細をレスポンスに出力  
+
+### 修正（不具合対応）
+/scheduled-posts APIにおいて更新処理が存在せず、常に新規作成される問題を確認  
+post_id を毎回新規生成していたため、既存データが上書きされない設計となっていた  
+
+今後の対応方針：  
+- 更新用API（PUT /scheduled-posts/{post_id}）の追加  
+- 既存データの上書き処理（update_item）の実装  
+- フロントエンドで post_id を保持し更新時に送信する設計へ変更  
+
+### 検証
+Threads OAuthログイン成功  
+Cookie発行およびセッション保持を確認  
+/me にて認証状態が正しく判定されることを確認（200 / 401）  
+ログアウト後にセッション削除されることを確認  
+
+ローカル環境およびdev環境でログインフローが成立することを確認  
+Threads投稿APIにより実際に投稿されることを確認  
+
+CORSプリフライト（OPTIONS）が正常に通過することを確認  
+
+/scheduled-posts APIで予約データがDynamoDBに保存されることを確認  
+5分以内の投稿予約がバリデーションで拒否されることを確認  
+
+フロントエンドのタイムゾーン依存で正しい時刻が保存されることを確認  
+
+### 未解決・次回対応
+ThreadsアクセストークンのKMS暗号化保存  
+長期トークンへの交換処理  
+ユーザーテーブル（users）への保存  
+
+EventBridge Schedulerによる予約投稿実行処理  
+publish_post.py の本実装（投稿実行＋ステータス更新）  
+
+投稿履歴一覧のAPI連携（scheduled_posts GET）  
+投稿失敗時のエラーハンドリング強化  
+投稿APIのレート制限対応  
+
+本番環境でのCookie属性最適化（SameSite/Domain）
