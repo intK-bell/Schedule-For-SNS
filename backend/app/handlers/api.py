@@ -493,7 +493,42 @@ def handler(event, context):
             })
     
     if method == "GET" and path == "/scheduled-posts":
-        return response(HTTPStatus.OK, {"items": []})
+        try:
+            session_id = get_cookie(event, "session")
+
+            if not session_id:
+                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
+            session_res = sessions_table.get_item(Key={"session_id": session_id})
+            session = session_res.get("Item")
+
+            if not session:
+                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
+            scan_res = scheduled_posts_table.scan(
+                FilterExpression="threads_user_id = :uid",
+                ExpressionAttributeValues={
+                    ":uid": session["threads_user_id"],
+                },
+            )
+
+            items = scan_res.get("Items", [])
+
+            items.sort(
+                key=lambda item: item.get("scheduled_at", ""),
+                reverse=True,
+            )
+
+            return response(HTTPStatus.OK, {
+                "items": items,
+            })
+
+        except Exception as e:
+            print("SCHEDULE LIST ERROR", repr(e))
+            return response(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                "message": "Schedule list failed",
+                "detail": str(e),
+            })
 
     if path.startswith("/analytics"):
         return response(HTTPStatus.OK, {"summary": {}, "items": []})

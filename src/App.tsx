@@ -157,7 +157,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(today);
   const [visibleMonth, setVisibleMonth] = useState(currentMonth);
 
-  const [posts, setPosts] = useState(initialPosts);
+  const [posts, setPosts] = useState<ScheduledPost[]>([]);
   const [draft, setDraft] = useState({
     date: today,
     time: currentTime,
@@ -208,9 +208,11 @@ function App() {
         setIsLoggedIn(true);
   
         console.log("ME RESULT", data);
-
+  
         setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
         setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
+  
+        await fetchScheduledPosts();
       })
       .catch(() => {
         setIsLoggedIn(false);
@@ -234,6 +236,38 @@ function App() {
       timezone: userTimezone,
       content: ""
     });
+  }
+
+  function toScheduledPost(item: any): ScheduledPost {
+    const scheduledAt = new Date(item.scheduled_at);
+  
+    return {
+      id: item.post_id,
+      content: item.content,
+      date: scheduledAt.toLocaleDateString("sv-SE"),
+      time: scheduledAt.toLocaleTimeString("sv-SE", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }),
+      timezone: item.timezone ?? "Asia/Tokyo",
+      status: item.status ?? "scheduled",
+    };
+  }
+  
+  async function fetchScheduledPosts() {
+    const res = await fetch(`${apiBaseUrl}/scheduled-posts`, {
+      credentials: "include",
+    });
+  
+    const data = await res.json();
+  
+    if (!res.ok) {
+      console.log("SCHEDULE LIST ERROR", data);
+      return;
+    }
+  
+    setPosts((data.items ?? []).map(toScheduledPost));
   }
 
   function beginEdit(post: ScheduledPost) {
