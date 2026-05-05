@@ -309,3 +309,88 @@ failure_reasonのフロント表示対応
 
 sessionsテーブルからのアクセストークン取得を暫定実装しているため  
 thread_tokensテーブルへの分離およびKMS暗号化対応
+
+## 2026-05-05 JST（続き2）
+### 追加
+
+自動投稿の実行確認およびトラブルシュート機構を実装
+
+PostExecutorFunctionにおいてThreads APIエラー内容の詳細ログ出力を追加
+HTTPErrorのレスポンス本文をCloudWatch Logsへ出力することで原因特定を可能に
+
+Threadsアクセストークンを短期トークンから長期トークン（約60日）へ交換する処理を実装
+ログイン時にaccess_token_expires_atを計算しDynamoDBへ保存
+
+投稿失敗時の状態管理を強化
+scheduled_posts に以下の項目を追加
+
+failure_reason（ユーザー表示用）
+failure_detail（内部ログ用）
+
+failure_reasonをユーザー向けメッセージへ変換するロジックを実装
+（トークン期限切れ・投稿内容エラー・レート制限などを分類）
+
+フロントエンドにfailure_reasonの表示を追加
+予約一覧で失敗理由をユーザーに可視化
+
+予約投稿更新API PUT /scheduled-posts/{post_id} を実装
+EventBridge Schedulerの差し替え処理を追加
+
+新Scheduler作成
+DynamoDB更新
+旧Scheduler削除
+
+DELETE時のScheduler削除処理を実装
+予約キャンセル時にEventBridge Schedulerも削除するように変更
+
+thread_tokensテーブルを新規追加
+Threadsアクセストークン管理をsessionsテーブルから分離
+
+ログイン時にthread_tokensへ以下を保存
+
+access_token
+access_token_expires_at
+reauth_required
+updated_at
+
+PostExecutorFunctionにてthread_tokensテーブルからアクセストークンを取得する処理を実装
+sessionsテーブル依存を解消
+
+### 変更
+
+アクセストークン管理をsessionsテーブルからthread_tokensテーブルへ移行
+sessionsはセッション管理専用とし、責務を分離
+
+PostExecutorFunctionのトークン取得ロジックをscan方式からget_item方式へ変更
+（threads_user_idをPKとした単一取得へ最適化）
+
+エラーハンドリングを強化
+Threads APIエラーをそのまま返却するのではなく、ユーザー向けメッセージへ変換
+
+### 検証
+
+EventBridge Schedulerにより指定時刻にLambdaが起動することを確認
+PostExecutorFunctionが正常にThreads投稿を実行することを確認
+
+長期トークンを利用した投稿が成功することを確認
+トークン期限切れ時にfailure_reasonが適切に表示されることを確認
+
+PUTによる予約変更時にSchedulerが正しく差し替えられることを確認
+DELETEによる予約キャンセル時にSchedulerが削除されることを確認
+
+フロントエンドにおいて失敗理由がユーザーに表示されることを確認
+
+### 未解決・次回対応
+
+アクセストークンの自動更新（refresh処理）の実装
+token期限切れ前の更新Lambdaの設計
+
+reauth_requiredフラグを利用したUI改善
+（再ログイン導線の追加）
+
+thread_tokensテーブルのKMS暗号化対応
+
+投稿失敗時のリトライ機構の検討
+（手動再投稿 or 自動リトライ）
+
+投稿可能期間制限（トークン期限考慮）の実装

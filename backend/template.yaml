@@ -176,6 +176,26 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref ThreadTokensTable
 
+  TokenRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: handlers.token_refresh.handler
+      Timeout: 60
+      Environment:
+        Variables:
+          THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
+          THREADS_CLIENT_SECRET: !Ref ThreadsClientSecret
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ThreadTokensTable
+      Events:
+        DailyRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 18 * * ? *)
+            Enabled: true
+
   AnalyticsSyncFunction:
     Type: AWS::Serverless::Function
     Properties:

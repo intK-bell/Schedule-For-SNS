@@ -393,9 +393,25 @@ def handler(event, context):
             return response(HTTPStatus.BAD_REQUEST, {"message": "Text is required"})
 
         try:
+            token_res = thread_tokens_table.get_item(
+                Key={"threads_user_id": session["threads_user_id"]}
+            )
+
+            token = token_res.get("Item")
+
+            if not token or not token.get("access_token"):
+                return response(HTTPStatus.BAD_REQUEST, {
+                    "message": "Threads連携情報が見つかりません。再ログインしてください。"
+                })
+
+            if token.get("reauth_required") is True:
+                return response(HTTPStatus.BAD_REQUEST, {
+                    "message": "Threads再連携が必要です。再ログインしてください。"
+                })
+
             result = post_to_threads(
                 user_id=session["threads_user_id"],
-                access_token=session["access_token"],
+                access_token=token["access_token"],
                 text=text,
             )
 
@@ -486,6 +502,14 @@ def handler(event, context):
                 return response(
                     HTTPStatus.BAD_REQUEST,
                     {"message": "Reservation must be at least 5 minutes later"},
+                )
+            
+            max_schedule_dt = now_dt + timedelta(days=30)
+
+            if scheduled_dt > max_schedule_dt:
+                return response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"message": "予約できるのは30日先までです"},
                 )
             
             day_count = count_scheduled_posts_on_day(
@@ -592,6 +616,14 @@ def handler(event, context):
                 return response(
                     HTTPStatus.BAD_REQUEST,
                     {"message": "Reservation must be at least 5 minutes later"},
+                )
+            
+            max_schedule_dt = now_dt + timedelta(days=30)
+
+            if scheduled_dt > max_schedule_dt:
+                return response(
+                    HTTPStatus.BAD_REQUEST,
+                    {"message": "予約できるのは30日先までです"},
                 )
 
             # ▼ 既存post取得
