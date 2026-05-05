@@ -100,6 +100,11 @@ Resources:
     Properties:
       CodeUri: app/
       Handler: handlers.api.handler
+      Environment:
+        Variables:
+          POST_EXECUTOR_FUNCTION_ARN: !GetAtt PostExecutorFunction.Arn
+          SCHEDULER_INVOKE_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
+          SCHEDULER_GROUP_NAME: default
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -124,7 +129,13 @@ Resources:
             Action:
               - scheduler:CreateSchedule
               - scheduler:DeleteSchedule
+              - scheduler:GetSchedule
             Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt SchedulerInvokeRole.Arn
       Events:
         Proxy:
           Type: HttpApi
@@ -146,6 +157,18 @@ Resources:
             TableName: !Ref ThreadTokensTable
         - DynamoDBReadPolicy:
             TableName: !Ref SubscriptionsTable
+        
+  PostExecutorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: handlers.post_executor.handler
+      Timeout: 30
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ScheduledPostsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref SessionsTable
 
   AnalyticsSyncFunction:
     Type: AWS::Serverless::Function
@@ -223,6 +246,24 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+  SchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowInvokeLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt PostExecutorFunction.Arn
 
   SubscriptionsTable:
     Type: AWS::DynamoDB::Table

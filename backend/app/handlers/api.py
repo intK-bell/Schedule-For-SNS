@@ -16,6 +16,7 @@ from handlers.common import app_url, redirect, request_method, request_path, res
 dynamodb = boto3.resource("dynamodb")
 sessions_table = dynamodb.Table(os.environ["SESSIONS_TABLE"])
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
+scheduler = boto3.client("scheduler")
 
 ALLOWED_RETURN_TO = [
     "http://localhost:5173",
@@ -129,6 +130,30 @@ def count_scheduled_posts_on_day(
     )
 
     return len(scan_res.get("Items", []))
+
+def to_scheduler_time(scheduled_at: str) -> str:
+    dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+def create_schedule(scheduler_name: str, post_id: str, scheduled_at: str):
+    scheduler.create_schedule(
+        Name=scheduler_name,
+        GroupName=os.environ.get("SCHEDULER_GROUP_NAME", "default"),
+        ScheduleExpression=f"at({to_scheduler_time(scheduled_at)})",
+        FlexibleTimeWindow={"Mode": "OFF"},
+        Target={
+            "Arn": os.environ["POST_EXECUTOR_FUNCTION_ARN"],
+            "RoleArn": os.environ["SCHEDULER_INVOKE_ROLE_ARN"],
+            "Input": json.dumps({"post_id": post_id}),
+        },
+    )
+
+
+def delete_schedule(scheduler_name: str):
+    scheduler.delete_schedule(
+        Name=scheduler_name,
+        GroupName=os.environ.get("SCHEDULER_GROUP_NAME", "default"),
+    )
 
 def handler(event, context):
     method = request_method(event)
@@ -424,6 +449,7 @@ def handler(event, context):
                 )
 
             post_id = secrets.token_urlsafe(16)
+            scheduler_name = f"s4s-post-{post_id}"
             now = int(time.time())
 
             item = {
@@ -433,11 +459,26 @@ def handler(event, context):
                 "scheduled_at": scheduled_at,
                 "timezone": user_timezone,
                 "status": "scheduled",
+                "scheduler_name": scheduler_name,
                 "created_at": now,
                 "updated_at": now,
             }
 
             scheduled_posts_table.put_item(Item=item)
+
+            try:
+                create_schedule(
+                    scheduler_name=scheduler_name,
+                    post_id=post_id,
+                    scheduled_at=scheduled_at,
+                )
+            except Exception as e:
+                print("CREATE SCHEDULE ERROR", repr(e))
+
+                return response(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "message": "Schedule creation failed",
+                    "detail": str(e),
+                })
 
             return response(HTTPStatus.OK, {
                 "ok": True,
@@ -582,17 +623,17 @@ def handler(event, context):
             if not session:
                 return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
 
-            scheduled_posts_table.delete_item(
-                Key={"post_id": post_id},
-                ConditionExpression="threads_user_id = :uid AND #status = :scheduled",
-                ExpressionAttributeNames={
-                    "#status": "status",
-                },
-                ExpressionAttributeValues={
-                    ":uid": session["threads_user_id"],
-                    ":scheduled": "scheduled",
-                },
-            )
+            # scheduled_posts_table.delete_item(
+            #     Key={"post_id": post_id},
+            #     ConditionExpression="threads_user_id = :uid AND #status = :scheduled",
+            #     ExpressionAttributeNames={
+            #         "#status": "status",
+            #     },
+            #     ExpressionAttributeValues={
+            #         ":uid": session["threads_user_id"],
+            #         ":scheduled": "scheduled",
+            #     },
+            # )
 
             return response(HTTPStatus.OK, {
                 "ok": True,

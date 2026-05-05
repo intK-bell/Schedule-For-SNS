@@ -262,3 +262,50 @@ publish_post.py の本実装（投稿実行＋ステータス更新）
 投稿APIのレート制限対応  
 
 本番環境でのCookie属性最適化（SameSite/Domain）
+
+## 2026-05-05 JST（続き）
+
+### 追加
+EventBridge Schedulerによる自動投稿基盤を実装  
+
+PostExecutorFunction（投稿実行Lambda）を新規作成  
+scheduled_posts.status を利用した二重投稿防止ロジックを実装（scheduled → posting → posted）  
+
+EventBridge Scheduler連携を実装  
+POST /scheduled-posts 実行時に単発スケジュール（at式）を作成  
+scheduler_name を scheduled_posts に保存  
+
+Scheduler実行時に post_id を引き渡し、投稿LambdaでThreads投稿を実行する構成を実装  
+
+IAM Role（SchedulerInvokeRole）を追加  
+EventBridge SchedulerからLambdaをinvokeするための権限を設定  
+
+API Lambdaに以下の権限を追加  
+- scheduler:CreateSchedule  
+- scheduler:DeleteSchedule  
+- scheduler:GetSchedule  
+- iam:PassRole（SchedulerInvokeRoleの引き渡し用）  
+
+### 変更
+/scheduled-posts 作成処理を拡張  
+→ DynamoDB保存後にEventBridge Schedulerを作成する処理を追加  
+
+Scheduler作成失敗時のエラーハンドリングを追加  
+→ 予約作成を失敗として扱い、エラーメッセージを返却  
+
+### 検証
+EventBridge Schedulerにスケジュールが作成されることを確認  
+scheduler_name がDynamoDBに保存されることを確認  
+iam:PassRoleエラーを解消し、CreateScheduleが成功することを確認  
+
+### 未解決・次回対応
+自動投稿（PostExecutorFunction）の実行結果確認  
+Threadsへの投稿成功・失敗の検証  
+
+DELETE時のScheduler削除処理  
+PUT時のScheduler差し替え処理  
+
+failure_reasonのフロント表示対応  
+
+sessionsテーブルからのアクセストークン取得を暫定実装しているため  
+thread_tokensテーブルへの分離およびKMS暗号化対応
