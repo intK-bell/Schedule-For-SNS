@@ -262,6 +262,7 @@ function App() {
       }),
       timezone: item.timezone ?? "Asia/Tokyo",
       status: item.status ?? "scheduled",
+      failureReason: item.failure_reason ?? "",
     };
   }
   

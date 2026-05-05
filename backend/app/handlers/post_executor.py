@@ -4,7 +4,7 @@ import time
 import urllib.parse
 import urllib.request
 import boto3
-from decimal import Decimal
+from urllib.error import HTTPError
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -32,8 +32,17 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
 
-    with urllib.request.urlopen(create_req) as res:
-        create_body = json.loads(res.read())
+    try:
+        with urllib.request.urlopen(create_req) as res:
+            create_body = json.loads(res.read())
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        print({
+            "stage": "threads_create_error",
+            "status_code": e.code,
+            "error_body": error_body,
+        })
+        raise Exception(f"Threads create failed: {error_body}")
 
     creation_id = create_body.get("id")
 
@@ -54,8 +63,17 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
 
-    with urllib.request.urlopen(publish_req) as res:
-        return json.loads(res.read())
+    try:
+        with urllib.request.urlopen(publish_req) as res:
+            return json.loads(res.read())
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        print({
+            "stage": "threads_publish_error",
+            "status_code": e.code,
+            "error_body": error_body,
+        })
+        raise Exception(f"Threads publish failed: {error_body}")
 
 
 def get_access_token_by_threads_user_id(threads_user_id: str) -> str:
@@ -66,7 +84,6 @@ def get_access_token_by_threads_user_id(threads_user_id: str) -> str:
         ExpressionAttributeValues={
             ":uid": threads_user_id,
         },
-        Limit=1,
     )
 
     items = scan_res.get("Items", [])
@@ -74,7 +91,20 @@ def get_access_token_by_threads_user_id(threads_user_id: str) -> str:
     if not items:
         raise Exception("Session token not found")
 
-    access_token = items[0].get("access_token")
+    items.sort(
+        key=lambda item: int(item.get("created_at", 0)),
+        reverse=True,
+    )
+
+    latest_session = items[0]
+
+    print("TOKEN SESSION SELECTED", {
+        "created_at": int(latest_session.get("created_at", 0)),
+        "has_access_token_expires_at": bool(latest_session.get("access_token_expires_at")),
+        "access_token_expires_at": int(latest_session.get("access_token_expires_at", 0)),
+    })
+
+    access_token = latest_session.get("access_token")
 
     if not access_token:
         raise Exception("Access token not found")

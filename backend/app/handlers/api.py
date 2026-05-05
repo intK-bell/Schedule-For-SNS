@@ -10,6 +10,7 @@ import stripe
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from boto3.dynamodb.conditions import Attr
+from urllib.error import HTTPError
 
 from handlers.common import app_url, redirect, request_method, request_path, response
 
@@ -61,8 +62,17 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
 
-    with urllib.request.urlopen(create_req) as res:
-        create_body = json.loads(res.read())
+    try:
+        with urllib.request.urlopen(create_req) as res:
+            create_body = json.loads(res.read())
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        print({
+            "stage": "threads_create_error",
+            "status_code": e.code,
+            "error_body": error_body,
+        })
+        raise
 
     creation_id = create_body.get("id")
 
@@ -84,8 +94,17 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
 
-    with urllib.request.urlopen(publish_req) as res:
-        publish_body = json.loads(res.read())
+    try:
+        with urllib.request.urlopen(publish_req) as res:
+            publish_body = json.loads(res.read())
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8", errors="replace")
+        print({
+            "stage": "threads_publish_error",
+            "status_code": e.code,
+            "error_body": error_body,
+        })
+        raise
 
     return publish_body
 
@@ -236,9 +255,33 @@ def handler(event, context):
         try:
             with urllib.request.urlopen(req) as res:
                 body = json.loads(res.read())
-                print("TOKEN RESPONSE", body)
+                print("TOKEN RESPONSE", {
+                    "has_access_token": bool(body.get("access_token")),
+                    "user_id": body.get("user_id"),
+                })
 
                 access_token = body.get("access_token")
+
+                # ▼ 短期トークンを長期トークンへ交換
+                long_token_url = "https://graph.threads.net/access_token"
+
+                long_token_params = urllib.parse.urlencode({
+                    "grant_type": "th_exchange_token",
+                    "client_secret": client_secret,
+                    "access_token": access_token,
+                })
+
+                with urllib.request.urlopen(f"{long_token_url}?{long_token_params}") as long_res:
+                    long_body = json.loads(long_res.read())
+
+                print("LONG TOKEN RESPONSE", {
+                    "has_access_token": bool(long_body.get("access_token")),
+                    "expires_in": long_body.get("expires_in"),
+                })
+
+                access_token = long_body.get("access_token")
+                expires_in = int(long_body.get("expires_in", 0))
+                access_token_expires_at = int(time.time()) + expires_in
 
                 # ▼ user_id取得
                 user_info_url = f"https://graph.threads.net/v1.0/me?fields=id,username&access_token={access_token}"
@@ -258,6 +301,7 @@ def handler(event, context):
                         "session_id": session_id,
                         "threads_user_id": user_id,
                         "access_token": access_token,
+                        "access_token_expires_at": access_token_expires_at,
                         "created_at": int(time.time()),
                         "expires_at": expires_at,
                     }
@@ -493,6 +537,8 @@ def handler(event, context):
             })
     
     if method == "PUT" and path.startswith("/scheduled-posts/"):
+        new_scheduler_name = None
+
         try:
             post_id = path.split("/")[-1]
 
@@ -536,7 +582,20 @@ def handler(event, context):
                     HTTPStatus.BAD_REQUEST,
                     {"message": "Reservation must be at least 5 minutes later"},
                 )
-            
+
+            # ▼ 既存post取得
+            old_res = scheduled_posts_table.get_item(Key={"post_id": post_id})
+            old_post = old_res.get("Item")
+
+            if not old_post:
+                return response(404, {"message": "Post not found"})
+
+            if old_post["threads_user_id"] != session["threads_user_id"]:
+                return response(403, {"message": "Forbidden"})
+
+            if old_post["status"] != "scheduled":
+                return response(400, {"message": "更新できる状態ではありません"})
+
             day_count = count_scheduled_posts_on_day(
                 threads_user_id=session["threads_user_id"],
                 scheduled_dt=scheduled_dt,
@@ -544,40 +603,71 @@ def handler(event, context):
                 exclude_post_id=post_id,
             )
 
-            if day_count >= 3:
-                return response(400, {"message": "1日3件までです"})
-
             if day_count >= DAILY_SCHEDULE_LIMIT:
                 return response(
                     HTTPStatus.BAD_REQUEST,
                     {"message": "この日は予約上限の3件に達しています"},
                 )
 
+            old_scheduler_name = old_post.get("scheduler_name")
+            new_scheduler_name = f"s4s-post-{post_id}-{int(time.time())}"
             now = int(time.time())
 
-            update_res = scheduled_posts_table.update_item(
-                Key={"post_id": post_id},
-                ConditionExpression="threads_user_id = :uid AND #status = :scheduled",
-                UpdateExpression="""
-                    SET content = :content,
-                        scheduled_at = :scheduled_at,
-                        #timezone = :timezone,
-                        updated_at = :updated_at
-                """,
-                ExpressionAttributeNames={
-                    "#status": "status",
-                    "#timezone": "timezone",
-                },
-                ExpressionAttributeValues={
-                    ":uid": session["threads_user_id"],
-                    ":scheduled": "scheduled",
-                    ":content": content,
-                    ":scheduled_at": scheduled_at,
-                    ":timezone": user_timezone,
-                    ":updated_at": now,
-                },
-                ReturnValues="ALL_NEW",
+            # ▼ ① 先に新Scheduler作成
+            create_schedule(
+                scheduler_name=new_scheduler_name,
+                post_id=post_id,
+                scheduled_at=scheduled_at,
             )
+
+            try:
+                # ▼ ② DynamoDB更新
+                update_res = scheduled_posts_table.update_item(
+                    Key={"post_id": post_id},
+                    ConditionExpression="threads_user_id = :uid AND #status = :scheduled",
+                    UpdateExpression="""
+                        SET content = :content,
+                            scheduled_at = :scheduled_at,
+                            #timezone = :timezone,
+                            scheduler_name = :scheduler_name,
+                            updated_at = :updated_at
+                    """,
+                    ExpressionAttributeNames={
+                        "#status": "status",
+                        "#timezone": "timezone",
+                    },
+                    ExpressionAttributeValues={
+                        ":uid": session["threads_user_id"],
+                        ":scheduled": "scheduled",
+                        ":content": content,
+                        ":scheduled_at": scheduled_at,
+                        ":timezone": user_timezone,
+                        ":scheduler_name": new_scheduler_name,
+                        ":updated_at": now,
+                    },
+                    ReturnValues="ALL_NEW",
+                )
+
+            except Exception:
+                # Dynamo更新に失敗したら、新しく作ったSchedulerを消す
+                try:
+                    delete_schedule(new_scheduler_name)
+                except Exception as delete_new_error:
+                    print("DELETE NEW SCHEDULER ERROR", {
+                        "scheduler_name": new_scheduler_name,
+                        "error": str(delete_new_error),
+                    })
+                raise
+
+            # ▼ ③ 古いScheduler削除
+            if old_scheduler_name:
+                try:
+                    delete_schedule(old_scheduler_name)
+                except Exception as delete_old_error:
+                    print("DELETE OLD SCHEDULER ERROR", {
+                        "scheduler_name": old_scheduler_name,
+                        "error": str(delete_old_error),
+                    })
 
             updated_post = update_res["Attributes"]
 
@@ -590,12 +680,19 @@ def handler(event, context):
                     "scheduled_at": updated_post["scheduled_at"],
                     "timezone": updated_post["timezone"],
                     "status": updated_post["status"],
+                    "scheduler_name": updated_post.get("scheduler_name"),
                     "created_at": int(updated_post["created_at"]),
                     "updated_at": int(updated_post["updated_at"]),
                 },
             })
 
         except scheduled_posts_table.meta.client.exceptions.ConditionalCheckFailedException:
+            if new_scheduler_name:
+                try:
+                    delete_schedule(new_scheduler_name)
+                except Exception:
+                    pass
+
             return response(
                 HTTPStatus.BAD_REQUEST,
                 {"message": "更新できる予約が見つからないか、すでに投稿済みです"},
@@ -623,28 +720,51 @@ def handler(event, context):
             if not session:
                 return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
 
-            # scheduled_posts_table.delete_item(
-            #     Key={"post_id": post_id},
-            #     ConditionExpression="threads_user_id = :uid AND #status = :scheduled",
-            #     ExpressionAttributeNames={
-            #         "#status": "status",
-            #     },
-            #     ExpressionAttributeValues={
-            #         ":uid": session["threads_user_id"],
-            #         ":scheduled": "scheduled",
-            #     },
-            # )
+            # ▼ ① post取得
+            post_res = scheduled_posts_table.get_item(Key={"post_id": post_id})
+            post = post_res.get("Item")
+
+            if not post:
+                return response(404, {"message": "Post not found"})
+
+            if post["threads_user_id"] != session["threads_user_id"]:
+                return response(403, {"message": "Forbidden"})
+
+            if post["status"] != "scheduled":
+                return response(400, {"message": "削除できる状態ではありません"})
+
+            scheduler_name = post.get("scheduler_name")
+
+            # ▼ ② Scheduler削除（失敗しても続行）
+            if scheduler_name:
+                try:
+                    delete_schedule(scheduler_name)
+                except Exception as e:
+                    print("DELETE SCHEDULER ERROR", {
+                        "scheduler_name": scheduler_name,
+                        "error": str(e),
+                    })
+
+            # ▼ ③ Dynamo更新（canceled）
+            scheduled_posts_table.update_item(
+                Key={"post_id": post_id},
+                UpdateExpression="""
+                    SET #status = :canceled,
+                        updated_at = :updated_at
+                """,
+                ExpressionAttributeNames={
+                    "#status": "status",
+                },
+                ExpressionAttributeValues={
+                    ":canceled": "canceled",
+                    ":updated_at": int(time.time()),
+                },
+            )
 
             return response(HTTPStatus.OK, {
                 "ok": True,
                 "post_id": post_id,
             })
-
-        except scheduled_posts_table.meta.client.exceptions.ConditionalCheckFailedException:
-            return response(
-                HTTPStatus.BAD_REQUEST,
-                {"message": "削除できる予約が見つからないか、すでに投稿済みです"},
-            )
 
         except Exception as e:
             print("SCHEDULE DELETE ERROR", repr(e))
@@ -689,6 +809,7 @@ def handler(event, context):
                     "scheduled_at": item["scheduled_at"],
                     "timezone": item.get("timezone", "Asia/Tokyo"),
                     "status": item.get("status", "scheduled"),
+                    "failure_reason": item.get("failure_reason", ""),
                     "created_at": int(item.get("created_at", 0)),
                     "updated_at": int(item.get("updated_at", 0)),
                 })
