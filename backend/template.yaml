@@ -105,6 +105,7 @@ Resources:
           POST_EXECUTOR_FUNCTION_ARN: !GetAtt PostExecutorFunction.Arn
           SCHEDULER_INVOKE_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
           SCHEDULER_GROUP_NAME: default
+          THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -164,11 +165,16 @@ Resources:
       CodeUri: app/
       Handler: handlers.post_executor.handler
       Timeout: 30
+      Environment:
+        Variables:
+          THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ScheduledPostsTable
         - DynamoDBReadPolicy:
             TableName: !Ref SessionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ThreadTokensTable
 
   AnalyticsSyncFunction:
     Type: AWS::Serverless::Function
@@ -246,6 +252,7 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
   SchedulerInvokeRole:
     Type: AWS::IAM::Role
     Properties:
@@ -362,6 +369,19 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: expires_at
         Enabled: true
+        
+  ThreadTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: threads_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: threads_user_id
+          KeyType: HASH
 
 Outputs:
   ApiUrl:

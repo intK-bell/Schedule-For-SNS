@@ -9,12 +9,34 @@ from urllib.error import HTTPError
 dynamodb = boto3.resource("dynamodb")
 
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
-sessions_table = dynamodb.Table(os.environ["SESSIONS_TABLE"])
+thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 
 
 def now_ts() -> int:
     return int(time.time())
 
+def to_user_failure_reason(error_text: str) -> str:
+    if not error_text:
+        return "投稿に失敗しました。再度予約してください。"
+
+    lowered = error_text.lower()
+
+    if "error validating access token" in lowered or '"code":190' in lowered:
+        return "Threadsとの連携期限が切れています。再ログインしてください。"
+
+    if "invalid oauth access token" in lowered:
+        return "Threadsとの連携が無効になっています。再ログインしてください。"
+
+    if "missing required parameter" in lowered or "invalid parameter" in lowered:
+        return "投稿内容に問題がある可能性があります。本文を確認してください。"
+
+    if "rate limit" in lowered or '"code":4' in lowered or '"code":17' in lowered:
+        return "Threads側の制限により投稿できませんでした。時間をおいて再度予約してください。"
+
+    if "http error 400" in lowered:
+        return "投稿リクエストに問題があり、投稿できませんでした。再度予約してください。"
+
+    return "投稿に失敗しました。再度予約してください。"
 
 def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
     create_url = f"https://graph.threads.net/v1.0/{user_id}/threads"
@@ -77,40 +99,31 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
 
 
 def get_access_token_by_threads_user_id(threads_user_id: str) -> str:
-    # MVP用：sessions_table から threads_user_id に紐づく token を探す
-    # 将来的には thread_tokens_table に分離する
-    scan_res = sessions_table.scan(
-        FilterExpression="threads_user_id = :uid",
-        ExpressionAttributeValues={
-            ":uid": threads_user_id,
-        },
+    token_res = thread_tokens_table.get_item(
+        Key={"threads_user_id": threads_user_id}
     )
 
-    items = scan_res.get("Items", [])
+    token = token_res.get("Item")
 
-    if not items:
-        raise Exception("Session token not found")
+    if not token:
+        raise Exception("Threads token not found")
 
-    items.sort(
-        key=lambda item: int(item.get("created_at", 0)),
-        reverse=True,
-    )
+    if token.get("reauth_required") is True:
+        raise Exception("Threads reauth required")
 
-    latest_session = items[0]
-
-    print("TOKEN SESSION SELECTED", {
-        "created_at": int(latest_session.get("created_at", 0)),
-        "has_access_token_expires_at": bool(latest_session.get("access_token_expires_at")),
-        "access_token_expires_at": int(latest_session.get("access_token_expires_at", 0)),
-    })
-
-    access_token = latest_session.get("access_token")
+    access_token = token.get("access_token")
 
     if not access_token:
         raise Exception("Access token not found")
 
-    return access_token
+    print("THREAD TOKEN SELECTED", {
+        "threads_user_id": threads_user_id,
+        "has_access_token_expires_at": bool(token.get("access_token_expires_at")),
+        "access_token_expires_at": int(token.get("access_token_expires_at", 0)),
+        "reauth_required": bool(token.get("reauth_required", False)),
+    })
 
+    return access_token
 
 def handler(event, context):
     print("POST EXECUTOR START", {
@@ -195,9 +208,13 @@ def handler(event, context):
         }
 
     except Exception as e:
+        error_text = str(e)
+        user_failure_reason = to_user_failure_reason(error_text)
+
         print("POST EXECUTOR ERROR", {
             "post_id": post_id,
-            "error": str(e),
+            "error": error_text,
+            "user_failure_reason": user_failure_reason,
         })
 
         scheduled_posts_table.update_item(
@@ -205,6 +222,7 @@ def handler(event, context):
             UpdateExpression="""
                 SET #status = :failed,
                     failure_reason = :failure_reason,
+                    failure_detail = :failure_detail,
                     updated_at = :updated_at
             """,
             ExpressionAttributeNames={
@@ -212,7 +230,8 @@ def handler(event, context):
             },
             ExpressionAttributeValues={
                 ":failed": "failed",
-                ":failure_reason": str(e),
+                ":failure_reason": user_failure_reason,
+                ":failure_detail": error_text[:1000],
                 ":updated_at": now_ts(),
             },
         )
@@ -220,5 +239,5 @@ def handler(event, context):
         return {
             "ok": False,
             "post_id": post_id,
-            "message": str(e),
+            "message": user_failure_reason,
         }

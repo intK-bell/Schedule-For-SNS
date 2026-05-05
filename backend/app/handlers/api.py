@@ -17,6 +17,7 @@ from handlers.common import app_url, redirect, request_method, request_path, res
 dynamodb = boto3.resource("dynamodb")
 sessions_table = dynamodb.Table(os.environ["SESSIONS_TABLE"])
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
+thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 scheduler = boto3.client("scheduler")
 
 ALLOWED_RETURN_TO = [
@@ -296,14 +297,24 @@ def handler(event, context):
 
                 expires_at = int(time.time()) + 60 * 60 * 24 * 30
 
+                now = int(time.time())
+
                 sessions_table.put_item(
                     Item={
                         "session_id": session_id,
                         "threads_user_id": user_id,
+                        "created_at": now,
+                        "expires_at": expires_at,
+                    }
+                )
+
+                thread_tokens_table.put_item(
+                    Item={
+                        "threads_user_id": user_id,
                         "access_token": access_token,
                         "access_token_expires_at": access_token_expires_at,
-                        "created_at": int(time.time()),
-                        "expires_at": expires_at,
+                        "reauth_required": False,
+                        "updated_at": now,
                     }
                 )
 
