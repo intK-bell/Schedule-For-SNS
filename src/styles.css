@@ -90,6 +90,19 @@ button:disabled {
   font-weight: 800;
 }
 
+.date-cell.disabled {
+  opacity: 0.35;
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.date-cell.disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .nav-stack {
   display: grid;
   gap: 8px;

@@ -629,6 +629,8 @@ function CalendarView({
   const isFull = remainingSlots === 0 && !editingId;
   const isContentEmpty = draft.content.trim().length === 0;
   const isDateTimeMissing = !draft.date || !draft.time;
+  const minDate = getTodayDate();
+  const maxDate = getMaxReservableDate();
 
   const submitDisabledReason = (() => {
     if (isBlocked) return "現在は予約できません";
@@ -668,23 +670,37 @@ function CalendarView({
           </label>
         </div>
         <div className="date-grid">
-          {dates.map((date) => {
-            const count = activePosts.filter((post) => post.date === date).length;
-            return (
-              <button
-                className={`date-cell ${selectedDate === date ? "selected" : ""}`}
-                key={date}
-                onClick={() => {
-                  setSelectedDate(date);
-                  setDraft({ ...draft, date });
-                }}
-              >
-                <strong>{date.slice(8)}</strong>
-                <span>{weekdayLabel(date)}</span>
-                <small>{count} 件</small>
-              </button>
-            );
-          })}
+        {dates.map((date) => {
+          const count = activePosts.filter((post) => post.date === date).length;
+          const isOutOfRange = date < minDate || date > maxDate;
+          const isFullDate = count >= 3 && date !== draft.date;
+          const isDisabledDate = isOutOfRange || isFullDate;
+
+          return (
+            <button
+              className={`date-cell ${selectedDate === date ? "selected" : ""} ${
+                isDisabledDate ? "disabled" : ""
+              }`}
+              key={date}
+              disabled={isDisabledDate}
+              onClick={() => {
+                setSelectedDate(date);
+                setDraft({ ...draft, date });
+              }}
+              title={
+                isOutOfRange
+                  ? "予約できるのは今日から30日以内です"
+                  : isFullDate
+                    ? "この日は予約上限の3件に達しています"
+                    : ""
+              }
+            >
+              <strong>{date.slice(8)}</strong>
+              <span>{weekdayLabel(date)}</span>
+              <small>{count} 件</small>
+            </button>
+          );
+        })}
         </div>
         <div className="day-list">
           <h3>選択日の予約</h3>
@@ -713,7 +729,13 @@ function CalendarView({
         <div className="form-grid">
           <label>
             日付
-            <input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} />
+            <input
+              type="date"
+              min={getTodayDate()}
+              max={getMaxReservableDate()}
+              value={draft.date}
+              onChange={(event) => setDraft({ ...draft, date: event.target.value })}
+            />
           </label>
           <label>
             時刻
@@ -951,6 +973,19 @@ function AnalyticsView({
       </section>
     </div>
   );
+}
+
+function getTodayDate() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today.toLocaleDateString("sv-SE");
+}
+
+function getMaxReservableDate() {
+  const maxDate = new Date();
+  maxDate.setHours(0, 0, 0, 0);
+  maxDate.setDate(maxDate.getDate() + 30);
+  return maxDate.toLocaleDateString("sv-SE");
 }
 
 function SettingsView({
