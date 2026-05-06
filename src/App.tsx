@@ -17,9 +17,12 @@ import {
   Trash2,
   XCircle
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import legalPoliciesText from "../docs/legal-policies.md?raw";
 
 type View = "calendar" | "posts" | "analytics" | "settings";
+type LegalDocument = "commerce" | "terms" | "privacy";
+type LocaleCode = "ja" | "en" | "zh" | "fil" | "vi";
 type PostStatus = "scheduled" | "posted" | "failed" | "canceled";
 type UserStatus = "active" | "paused" | "suspended";
 type SubscriptionStatus = "trialing" | "active" | "trial_expired" | "past_due" | "canceled" | "unpaid" | "incomplete";
@@ -52,13 +55,407 @@ type ApiScheduledPost = {
   failure_reason?: string;
 };
 
-const localeLabels = [
-  { code: "ja", label: "日本語" },
-  { code: "en", label: "English" },
-  { code: "zh", label: "中文" },
-  { code: "fil", label: "Filipino" },
-  { code: "vi", label: "Tiếng Việt" }
+const localeLabels: Array<{ code: LocaleCode; flag: string; label: string }> = [
+  { code: "ja", flag: "🇯🇵", label: "日本語" },
+  { code: "en", flag: "🇺🇸", label: "English" },
+  { code: "zh", flag: "🇨🇳", label: "中文" },
+  { code: "fil", flag: "🇵🇭", label: "Filipino" },
+  { code: "vi", flag: "🇻🇳", label: "Tiếng Việt" }
 ];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const uiText: Record<LocaleCode, any> = {
+  ja: {
+    loading: "Loading...",
+    loginEyebrow: "Threads scheduler",
+    loginLead: "Threadsの投稿を、カレンダーからかんたんに予約できます。",
+    loginButton: "Threadsでログイン",
+    trialOffer: "14日間無料。その後は税込390円/月。",
+    loginLanguage: "表示言語",
+    loginHighlights: ["30日先まで予約", "1日3件まで投稿予約", "基本分析を確認"],
+    serviceSubtitle: "Threads scheduler",
+    menuToggle: "メニューを開閉",
+    mainNav: "メイン",
+    logout: "ログアウト",
+    nav: { calendar: "予約作成", posts: "予約一覧", analytics: "分析", settings: "設定" },
+    billing: {
+      active: "登録済み",
+      activeBadge: "サブスク有効",
+      required: "登録が必要",
+      trial: "無料トライアル",
+      trialing: "トライアル中",
+      trialExpired: "トライアル終了",
+      remaining: (days: number, hours: number) => `残り${days}日 ${hours}時間`,
+      period: (start: string, end: string) => `開始 ${start} / 終了 ${end}`,
+      unset: "未設定",
+      checkout: "今すぐ登録",
+      expiredTitle: "無料トライアルが終了しました",
+      expiredBody: (period: string) => `${period}。予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。`,
+    },
+    notice: "Meta App Review向けに、投稿予約と基本分析に必要な最小スコープだけを使います。",
+    reconnect: {
+      title: "Threads再連携が必要です",
+      body: "再連携が完了するまで予約作成と投稿実行は停止されます。",
+      button: "再連携する",
+      shortButton: "再連携",
+      needed: "再連携が必要",
+      enabled: "有効",
+    },
+    paused: {
+      title: "休止中です",
+      body: "利用には再開が必要です。再開するまで予約・分析は停止されます。",
+      resume: "再開する",
+      pause: "休止にする",
+      active: "有効",
+      paused: "休止中",
+    },
+    calendar: {
+      eyebrow: "Calendar",
+      title: "日付を選択",
+      slots: (remaining: number) => `${remaining}/3 枠`,
+      monthLabel: "表示月",
+      dayCount: (count: number) => `${count} 件`,
+      selectedDay: "選択日の予約",
+      noPosts: "この日の予約はまだありません。",
+      newPost: "New post",
+      edit: "Edit",
+      composeTitle: "投稿を予約",
+      editTitle: "予約を編集",
+      minLead: "5分以内不可",
+      date: "日付",
+      time: "時刻",
+      timezone: "タイムゾーン",
+      content: "投稿本文",
+      placeholder: "Threadsへ投稿する本文を入力",
+      confirm: "予約内容を確認",
+      blocked: "現在は予約できません",
+      full: "この日は予約上限の3件に達しています",
+      missingDateTime: "投稿日時を選択してください",
+      emptyContent: "投稿本文を入力してください",
+      validTitle: "予約内容を確認します",
+      outsideRange: "予約できるのは今日から30日以内です",
+    },
+    posts: {
+      eyebrow: "Posts",
+      title: "予約と投稿履歴",
+      sort: "並び替え",
+      newest: "新しい順",
+      oldest: "古い順",
+      status: "ステータス順",
+      edit: "編集",
+      delete: "削除",
+      cloneFailed: "同じ本文で予約",
+    },
+    postStatus: {
+      scheduled: "予約済み",
+      posted: "投稿済み",
+      failed: "失敗",
+      canceled: "キャンセル済み",
+    },
+    analytics: {
+      views: "閲覧",
+      likes: "いいね",
+      replies: "返信",
+      reposts: "リポスト",
+      quotes: "引用",
+      shares: "シェア",
+      engagement: "合計エンゲージメント",
+      eyebrow: "Ranking",
+      title: "反応が良かった投稿",
+      cumulative: "累計値",
+    },
+    settings: {
+      eyebrow: "Account",
+      title: "連携と状態",
+      locale: "表示言語",
+      timezone: "タイムゾーン",
+      threads: "Threads連携",
+      userStatus: "利用状態",
+      billingStatus: "課金状態",
+      trialPeriod: "トライアル期間",
+      pauseNote: "休止: アカウントを残したまま予約作成、投稿実行、分析取得を停止します。再開すると利用を戻せます。",
+      deleteNote: "退会: サブスクリプションを終了し、未投稿予約、投稿本文、分析データ、Threads連携情報を削除します。",
+      delete: "退会",
+      legalEyebrow: "Legal",
+      legalTitle: "法務文書",
+      close: "閉じる",
+      confirmTitle: "予約内容を確認",
+      confirmEditTitle: "編集内容を確認",
+      dateTime: "日時",
+      body: "本文",
+      back: "戻る",
+      reserve: "予約する",
+      update: "更新する",
+    },
+    legal: {
+      commerce: "特定商取引法に基づく表記",
+      terms: "利用規約",
+      privacy: "プライバシーポリシー",
+    },
+    alerts: {
+      saveSettingsFailed: "設定の保存に失敗しました",
+      statusChangeFailed: "利用状態の変更に失敗しました",
+      deleteConfirm: "退会すると未投稿予約、投稿本文、分析データ、Threads連携情報を削除します。退会しますか？",
+      deleteFailed: "退会処理に失敗しました",
+      checkoutFailed: "Checkoutの開始に失敗しました",
+      contentRequired: "投稿本文を入力してください",
+      scheduleFailed: "予約に失敗しました",
+      scheduled: "予約しました！",
+      updated: "予約を更新しました！",
+      deletePostConfirm: "この予約投稿を削除しますか？",
+      postDeleteFailed: "削除に失敗しました",
+    },
+  },
+  en: {
+    loading: "Loading...",
+    loginEyebrow: "Threads scheduler",
+    loginLead: "Schedule Threads posts from a simple calendar.",
+    loginButton: "Log in with Threads",
+    trialOffer: "Free for 14 days. Then ¥390/month including tax.",
+    loginLanguage: "Display language",
+    loginHighlights: ["Schedule up to 30 days ahead", "Up to 3 scheduled posts per day", "Check basic analytics"],
+    serviceSubtitle: "Threads scheduler",
+    menuToggle: "Toggle menu",
+    mainNav: "Main",
+    logout: "Log out",
+    nav: { calendar: "Schedule", posts: "Posts", analytics: "Analytics", settings: "Settings" },
+    billing: {
+      active: "Subscribed",
+      activeBadge: "Subscription active",
+      required: "Subscription required",
+      trial: "Free trial",
+      trialing: "In trial",
+      trialExpired: "Trial ended",
+      remaining: (days: number, hours: number) => `${days}d ${hours}h left`,
+      period: (start: string, end: string) => `Start ${start} / End ${end}`,
+      unset: "Not set",
+      checkout: "Subscribe now",
+      expiredTitle: "Your free trial has ended",
+      expiredBody: (period: string) => `${period}. Scheduling, editing, publishing, and analytics require the ¥390/month plan.`,
+    },
+    notice: "For Meta App Review, this app uses only the minimum scopes needed for scheduling posts and basic analytics.",
+    reconnect: {
+      title: "Threads reconnect required",
+      body: "Scheduling and publishing are paused until reconnect is completed.",
+      button: "Reconnect",
+      shortButton: "Reconnect",
+      needed: "Reconnect required",
+      enabled: "Connected",
+    },
+    paused: {
+      title: "Account paused",
+      body: "Resume is required before use. Scheduling and analytics are stopped while paused.",
+      resume: "Resume",
+      pause: "Pause",
+      active: "Active",
+      paused: "Paused",
+    },
+    calendar: {
+      eyebrow: "Calendar",
+      title: "Choose a date",
+      slots: (remaining: number) => `${remaining}/3 slots`,
+      monthLabel: "Month",
+      dayCount: (count: number) => `${count} posts`,
+      selectedDay: "Selected date",
+      noPosts: "No scheduled posts for this date.",
+      newPost: "New post",
+      edit: "Edit",
+      composeTitle: "Schedule a post",
+      editTitle: "Edit schedule",
+      minLead: "At least 5 minutes",
+      date: "Date",
+      time: "Time",
+      timezone: "Time zone",
+      content: "Post text",
+      placeholder: "Write the text to post on Threads",
+      confirm: "Review schedule",
+      blocked: "Scheduling is currently unavailable",
+      full: "This date has reached the 3-post limit",
+      missingDateTime: "Choose a date and time",
+      emptyContent: "Enter post text",
+      validTitle: "Review the schedule",
+      outsideRange: "Posts can be scheduled up to 30 days ahead",
+    },
+    posts: {
+      eyebrow: "Posts",
+      title: "Scheduled and posted",
+      sort: "Sort",
+      newest: "Newest",
+      oldest: "Oldest",
+      status: "Status",
+      edit: "Edit",
+      delete: "Delete",
+      cloneFailed: "Schedule same text",
+    },
+    postStatus: {
+      scheduled: "Scheduled",
+      posted: "Posted",
+      failed: "Failed",
+      canceled: "Canceled",
+    },
+    analytics: {
+      views: "Views",
+      likes: "Likes",
+      replies: "Replies",
+      reposts: "Reposts",
+      quotes: "Quotes",
+      shares: "Shares",
+      engagement: "Total engagement",
+      eyebrow: "Ranking",
+      title: "Top performing posts",
+      cumulative: "Cumulative",
+    },
+    settings: {
+      eyebrow: "Account",
+      title: "Connection and status",
+      locale: "Display language",
+      timezone: "Time zone",
+      threads: "Threads connection",
+      userStatus: "Account status",
+      billingStatus: "Billing status",
+      trialPeriod: "Trial period",
+      pauseNote: "Pause: Keep the account but stop scheduling, publishing, and analytics. You can resume later.",
+      deleteNote: "Delete account: End the subscription and delete pending schedules, post text, analytics data, and Threads connection data.",
+      delete: "Delete account",
+      legalEyebrow: "Legal",
+      legalTitle: "Legal documents",
+      close: "Close",
+      confirmTitle: "Review schedule",
+      confirmEditTitle: "Review changes",
+      dateTime: "Date and time",
+      body: "Text",
+      back: "Back",
+      reserve: "Schedule",
+      update: "Update",
+    },
+    legal: {
+      commerce: "Specified Commercial Transaction Act notice",
+      terms: "Terms of Use",
+      privacy: "Privacy Policy",
+    },
+    alerts: {
+      saveSettingsFailed: "Failed to save settings",
+      statusChangeFailed: "Failed to change account status",
+      deleteConfirm: "Deleting your account will remove pending schedules, post text, analytics data, and Threads connection data. Continue?",
+      deleteFailed: "Failed to delete account",
+      checkoutFailed: "Failed to start Checkout",
+      contentRequired: "Enter post text",
+      scheduleFailed: "Failed to schedule",
+      scheduled: "Scheduled.",
+      updated: "Schedule updated.",
+      deletePostConfirm: "Delete this scheduled post?",
+      postDeleteFailed: "Failed to delete",
+    },
+  },
+  zh: {} as never,
+  fil: {} as never,
+  vi: {} as never,
+};
+
+uiText.zh = {
+  ...uiText.en,
+  loginEyebrow: "Threads 预约工具",
+  loginLead: "通过日历轻松预约 Threads 帖子。",
+  loginButton: "使用 Threads 登录",
+  trialOffer: "免费试用14天，之后每月390日元（含税）。",
+  loginLanguage: "显示语言",
+  loginHighlights: ["最多可预约30天后", "每天最多预约3条帖子", "查看基础分析"],
+  mainNav: "主导航",
+  logout: "退出登录",
+  nav: { calendar: "预约", posts: "帖子", analytics: "分析", settings: "设置" },
+  billing: {
+    ...uiText.en.billing,
+    active: "已订阅",
+    activeBadge: "订阅有效",
+    required: "需要订阅",
+    trial: "免费试用",
+    trialing: "试用中",
+    trialExpired: "试用已结束",
+    remaining: (days: number, hours: number) => `剩余${days}天 ${hours}小时`,
+    period: (start: string, end: string) => `开始 ${start} / 结束 ${end}`,
+    unset: "未设置",
+    checkout: "立即订阅",
+    expiredTitle: "免费试用已结束",
+    expiredBody: (period: string) => `${period}。预约、编辑、发布和分析需要每月390日元的套餐。`,
+  },
+  notice: "为通过 Meta App Review，本应用仅使用预约投稿和基础分析所需的最小权限。",
+  reconnect: { ...uiText.en.reconnect, title: "需要重新连接 Threads", body: "重新连接完成前，预约和发布将暂停。", button: "重新连接", shortButton: "重新连接", needed: "需要重新连接", enabled: "有效" },
+  paused: { ...uiText.en.paused, title: "账户已休止", body: "需要恢复后才能使用。休止期间预约和分析会停止。", resume: "恢复", pause: "休止", active: "有效", paused: "休止中" },
+  calendar: { ...uiText.en.calendar, title: "选择日期", monthLabel: "显示月份", selectedDay: "所选日期的预约", noPosts: "该日期还没有预约。", composeTitle: "预约帖子", editTitle: "编辑预约", date: "日期", time: "时间", timezone: "时区", content: "帖子内容", confirm: "确认预约", blocked: "当前无法预约", emptyContent: "请输入帖子内容" },
+  posts: { ...uiText.en.posts, title: "预约与发布记录", sort: "排序", newest: "最新", oldest: "最旧", status: "状态", edit: "编辑", delete: "删除", cloneFailed: "用相同内容预约" },
+  postStatus: { scheduled: "已预约", posted: "已发布", failed: "失败", canceled: "已取消" },
+  analytics: { ...uiText.en.analytics, views: "浏览", likes: "赞", replies: "回复", reposts: "转发", quotes: "引用", shares: "分享", engagement: "总互动", title: "表现较好的帖子", cumulative: "累计" },
+  settings: { ...uiText.en.settings, title: "连接与状态", locale: "显示语言", timezone: "时区", threads: "Threads连接", userStatus: "使用状态", billingStatus: "账单状态", trialPeriod: "试用期间", delete: "退会", legalTitle: "法律文件", close: "关闭", dateTime: "日期时间", body: "正文", back: "返回", reserve: "预约", update: "更新" },
+  legal: { commerce: "特定商业交易法标识", terms: "使用条款", privacy: "隐私政策" },
+  alerts: { ...uiText.en.alerts, saveSettingsFailed: "设置保存失败", statusChangeFailed: "状态变更失败", deleteFailed: "退会处理失败", checkoutFailed: "Checkout启动失败", contentRequired: "请输入帖子内容", scheduleFailed: "预约失败", scheduled: "已预约。", updated: "预约已更新。", deletePostConfirm: "要删除这个预约吗？", postDeleteFailed: "删除失败" },
+};
+
+uiText.fil = {
+  ...uiText.en,
+  loginEyebrow: "Threads scheduler",
+  loginLead: "Madaling mag-schedule ng Threads posts gamit ang calendar.",
+  loginButton: "Mag-log in gamit ang Threads",
+  trialOffer: "Libre sa loob ng 14 araw. Pagkatapos ay ¥390/buwan kasama ang tax.",
+  loginLanguage: "Display language",
+  loginHighlights: ["Mag-schedule hanggang 30 araw ahead", "Hanggang 3 scheduled posts bawat araw", "Tingnan ang basic analytics"],
+  mainNav: "Pangunahing menu",
+  logout: "Mag-log out",
+  nav: { calendar: "Schedule", posts: "Posts", analytics: "Analytics", settings: "Settings" },
+  billing: { ...uiText.en.billing, trial: "Free trial", trialing: "Nasa trial", checkout: "Mag-subscribe ngayon", remaining: (days: number, hours: number) => `${days} araw ${hours} oras pa`, period: (start: string, end: string) => `Simula ${start} / Wakas ${end}` },
+  notice: "Para sa Meta App Review, minimum scopes lang ang ginagamit para sa scheduled posts at basic analytics.",
+  reconnect: { ...uiText.en.reconnect, title: "Kailangan muling ikonekta ang Threads", body: "Naka-pause ang scheduling at publishing hanggang makumpleto ang reconnect.", button: "Reconnect", shortButton: "Reconnect", needed: "Kailangan reconnect", enabled: "Connected" },
+  paused: { ...uiText.en.paused, title: "Naka-pause ang account", body: "Kailangang i-resume para magamit. Naka-stop ang scheduling at analytics habang naka-pause.", resume: "Resume", pause: "Pause", active: "Active", paused: "Paused" },
+  calendar: { ...uiText.en.calendar, title: "Pumili ng petsa", monthLabel: "Buwan", selectedDay: "Napiling petsa", noPosts: "Wala pang scheduled posts sa petsang ito.", composeTitle: "Mag-schedule ng post", editTitle: "I-edit ang schedule", date: "Petsa", time: "Oras", timezone: "Time zone", content: "Post text", confirm: "Suriin ang schedule", blocked: "Hindi maaaring mag-schedule ngayon", emptyContent: "Ilagay ang post text" },
+  posts: { ...uiText.en.posts, title: "Scheduled at posted", sort: "Ayusin", newest: "Pinakabago", oldest: "Pinakaluma", status: "Status", edit: "Edit", delete: "Delete", cloneFailed: "I-schedule ang parehong text" },
+  postStatus: { scheduled: "Scheduled", posted: "Posted", failed: "Failed", canceled: "Canceled" },
+  analytics: { ...uiText.en.analytics, views: "Views", likes: "Likes", replies: "Replies", reposts: "Reposts", quotes: "Quotes", shares: "Shares", engagement: "Total engagement", title: "Pinakamagandang posts", cumulative: "Cumulative" },
+  settings: { ...uiText.en.settings, title: "Connection at status", locale: "Display language", timezone: "Time zone", threads: "Threads connection", userStatus: "Account status", billingStatus: "Billing status", trialPeriod: "Trial period", delete: "Delete account", legalTitle: "Legal documents", close: "Close", dateTime: "Petsa at oras", body: "Text", back: "Back", reserve: "Schedule", update: "Update" },
+  legal: { commerce: "Commercial transaction notice", terms: "Terms of Use", privacy: "Privacy Policy" },
+};
+
+uiText.vi = {
+  ...uiText.en,
+  loginEyebrow: "Công cụ lên lịch Threads",
+  loginLead: "Lên lịch bài đăng Threads dễ dàng bằng lịch.",
+  loginButton: "Đăng nhập bằng Threads",
+  trialOffer: "Miễn phí 14 ngày. Sau đó ¥390/tháng gồm thuế.",
+  loginLanguage: "Ngôn ngữ hiển thị",
+  loginHighlights: ["Lên lịch trước tối đa 30 ngày", "Tối đa 3 bài đã lên lịch mỗi ngày", "Xem phân tích cơ bản"],
+  mainNav: "Điều hướng chính",
+  logout: "Đăng xuất",
+  nav: { calendar: "Lên lịch", posts: "Bài đăng", analytics: "Phân tích", settings: "Cài đặt" },
+  billing: { ...uiText.en.billing, trial: "Dùng thử miễn phí", trialing: "Đang dùng thử", checkout: "Đăng ký ngay", remaining: (days: number, hours: number) => `Còn ${days} ngày ${hours} giờ`, period: (start: string, end: string) => `Bắt đầu ${start} / Kết thúc ${end}` },
+  notice: "Để phục vụ Meta App Review, ứng dụng chỉ dùng các quyền tối thiểu cần cho lên lịch và phân tích cơ bản.",
+  reconnect: { ...uiText.en.reconnect, title: "Cần kết nối lại Threads", body: "Lên lịch và đăng bài sẽ tạm dừng cho đến khi kết nối lại hoàn tất.", button: "Kết nối lại", shortButton: "Kết nối lại", needed: "Cần kết nối lại", enabled: "Đã kết nối" },
+  paused: { ...uiText.en.paused, title: "Tài khoản đang tạm dừng", body: "Cần tiếp tục để sử dụng. Lên lịch và phân tích sẽ dừng khi tạm dừng.", resume: "Tiếp tục", pause: "Tạm dừng", active: "Hoạt động", paused: "Tạm dừng" },
+  calendar: { ...uiText.en.calendar, title: "Chọn ngày", monthLabel: "Tháng", selectedDay: "Ngày đã chọn", noPosts: "Chưa có bài lên lịch cho ngày này.", composeTitle: "Lên lịch bài đăng", editTitle: "Sửa lịch", date: "Ngày", time: "Giờ", timezone: "Múi giờ", content: "Nội dung bài đăng", confirm: "Kiểm tra lịch", blocked: "Hiện không thể lên lịch", emptyContent: "Nhập nội dung bài đăng" },
+  posts: { ...uiText.en.posts, title: "Đã lên lịch và đã đăng", sort: "Sắp xếp", newest: "Mới nhất", oldest: "Cũ nhất", status: "Trạng thái", edit: "Sửa", delete: "Xóa", cloneFailed: "Lên lịch cùng nội dung" },
+  postStatus: { scheduled: "Đã lên lịch", posted: "Đã đăng", failed: "Thất bại", canceled: "Đã hủy" },
+  analytics: { ...uiText.en.analytics, views: "Lượt xem", likes: "Thích", replies: "Trả lời", reposts: "Đăng lại", quotes: "Trích dẫn", shares: "Chia sẻ", engagement: "Tổng tương tác", title: "Bài đăng hiệu quả", cumulative: "Tổng cộng" },
+  settings: { ...uiText.en.settings, title: "Kết nối và trạng thái", locale: "Ngôn ngữ hiển thị", timezone: "Múi giờ", threads: "Kết nối Threads", userStatus: "Trạng thái tài khoản", billingStatus: "Trạng thái thanh toán", trialPeriod: "Thời gian dùng thử", delete: "Xóa tài khoản", legalTitle: "Tài liệu pháp lý", close: "Đóng", dateTime: "Ngày giờ", body: "Nội dung", back: "Quay lại", reserve: "Lên lịch", update: "Cập nhật" },
+  legal: { commerce: "Thông báo giao dịch thương mại", terms: "Điều khoản sử dụng", privacy: "Chính sách quyền riêng tư" },
+};
+
+const legalDocuments: Record<LegalDocument, { heading: string; title: string }> = {
+  commerce: {
+    heading: "## 特定商取引法に基づく表記",
+    title: "特定商取引法に基づく表記",
+  },
+  terms: {
+    heading: "## 利用規約",
+    title: "利用規約",
+  },
+  privacy: {
+    heading: "## プライバシーポリシー",
+    title: "プライバシーポリシー",
+  },
+};
+
+function initialLocale(): LocaleCode {
+  if (typeof window === "undefined") return "ja";
+  const storedLocale = window.localStorage.getItem("s4s_locale");
+  return localeLabels.find((item) => item.code === storedLocale)?.code ?? "ja";
+}
 
 const statusMeta: Record<PostStatus, { label: string; icon: typeof Clock3; tone: string }> = {
   scheduled: { label: "予約済み", icon: Clock3, tone: "info" },
@@ -109,7 +506,9 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
   const [needsReconnect, setNeedsReconnect] = useState(false);
-  const [locale, setLocale] = useState("ja");
+  const [selectedLegalDocument, setSelectedLegalDocument] = useState<LegalDocument | null>(null);
+  const [locale, setLocale] = useState<string>(initialLocale);
+  const copy = uiText[locale as LocaleCode] ?? uiText.ja;
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>("trialing");
   const [trialStartedAt, setTrialStartedAt] = useState<number | null>(null);
   const [trialEnd, setTrialEnd] = useState<number | null>(null);
@@ -119,7 +518,7 @@ function App() {
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
   const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
   const [now, setNow] = useState(() => new Date());
-  const headerDate = formatHeaderDate(now, settingsTimezone);
+  const headerDate = formatHeaderDate(now, settingsTimezone, copy);
   const currentUnix = Math.floor(now.getTime() / 1000);
 
   const defaultDateTime = new Date();
@@ -174,13 +573,19 @@ function App() {
 
     const data = await res.json();
     if (!res.ok) {
-      alert(data.message ?? "設定の保存に失敗しました");
+      alert(data.message ?? copy.alerts.saveSettingsFailed);
       return;
     }
 
     setLocale(data.locale);
+    window.localStorage.setItem("s4s_locale", data.locale);
     setSettingsTimezone(data.timezone);
     setDraft((current) => ({ ...current, timezone: data.timezone }));
+  };
+
+  const changeLoginLocale = (nextLocale: string) => {
+    setLocale(nextLocale);
+    window.localStorage.setItem("s4s_locale", nextLocale);
   };
 
   const changeAccountStatus = async (nextStatus: "active" | "paused") => {
@@ -192,7 +597,7 @@ function App() {
 
     const data = await res.json();
     if (!res.ok) {
-      alert(data.message ?? "利用状態の変更に失敗しました");
+      alert(data.message ?? copy.alerts.statusChangeFailed);
       return;
     }
 
@@ -200,7 +605,7 @@ function App() {
   };
 
   const deleteAccount = async () => {
-    const confirmed = window.confirm("退会すると未投稿予約、投稿本文、分析データ、Threads連携情報を削除します。退会しますか？");
+    const confirmed = window.confirm(copy.alerts.deleteConfirm);
     if (!confirmed) return;
 
     const res = await fetch(`${apiBaseUrl}/account`, {
@@ -210,7 +615,7 @@ function App() {
 
     const data = await res.json();
     if (!res.ok) {
-      alert(data.message ?? "退会処理に失敗しました");
+      alert(data.message ?? copy.alerts.deleteFailed);
       return;
     }
 
@@ -225,7 +630,7 @@ function App() {
 
     const data = await res.json();
     if (!res.ok) {
-      alert(data.message ?? "Checkoutの開始に失敗しました");
+      alert(data.message ?? copy.alerts.checkoutFailed);
       return;
     }
 
@@ -266,9 +671,12 @@ function App() {
 
   const engagement = analytics.likes + analytics.replies + analytics.reposts + analytics.quotes + analytics.shares;
   const trialActiveByClient =
-    subscriptionStatus === "trialing" &&
     trialEnd !== null &&
     trialEnd > currentUnix;
+  const displaySubscriptionStatus =
+    subscriptionStatus !== "active" && trialActiveByClient
+      ? "trialing"
+      : subscriptionStatus;
   const hasEffectiveSubscriptionEntitlement =
     hasSubscriptionEntitlement || subscriptionStatus === "active" || trialActiveByClient;
   const isBlocked = userStatus !== "active" || needsReconnect || !hasEffectiveSubscriptionEntitlement;
@@ -312,6 +720,7 @@ function App() {
         setTrialEnd(data.trial_end ?? null);
         setHasSubscriptionEntitlement(Boolean(data.has_subscription_entitlement ?? false));
         setLocale(data.locale ?? "ja");
+        window.localStorage.setItem("s4s_locale", data.locale ?? "ja");
         setSettingsTimezone(data.timezone ?? userTimezone);
         setDraft((current) => ({
           ...current,
@@ -357,7 +766,7 @@ function App() {
 
   async function saveDraft() {
     if (!draft.content.trim()) {
-      alert("投稿本文を入力してください");
+      alert(copy.alerts.contentRequired);
       return;
     }
   
@@ -386,7 +795,7 @@ function App() {
     console.log("SCHEDULE RESULT", data);
   
     if (!res.ok) {
-      alert(data.message || "予約に失敗しました");
+      alert(data.message || copy.alerts.scheduleFailed);
       return;
     }
   
@@ -425,11 +834,11 @@ function App() {
     setEditingId(null);
     setShowConfirm(false);
     resetDraft();
-    alert(editingId ? "予約を更新しました！" : "予約しました！");
+    alert(editingId ? copy.alerts.updated : copy.alerts.scheduled);
   }
 
   async function deletePost(id: string) {
-    const confirmed = window.confirm("この予約投稿を削除しますか？");
+    const confirmed = window.confirm(copy.alerts.deletePostConfirm);
   
     if (!confirmed) {
       return;
@@ -443,7 +852,7 @@ function App() {
     const data = await res.json();
   
     if (!res.ok) {
-      alert(data.message ?? "削除に失敗しました");
+      alert(data.message ?? copy.alerts.postDeleteFailed);
       return;
     }
   
@@ -462,21 +871,39 @@ function App() {
   }
 
   if (isLoggedIn === null) {
-    return <div>Loading...</div>;
+    return <div>{copy.loading}</div>;
   }
 
   if (!isLoggedIn) {
     return (
       <div className="login-page">
-        <div className="login-card">
-          <h1>Schedule For SNS</h1>
-          <p>Threadsの投稿を、カレンダーからかんたんに予約できます。</p>
-  
-          <button className="button primary" onClick={handleThreadsLogin}>
-            Threadsでログイン
-          </button>
-  
-          <p className="muted-text">14日間無料。その後は税込390円/月。</p>
+        <div className="login-shell">
+          <div className="login-copy">
+            <div className="brand-lockup login-brand">
+              <div className="brand-mark">S4S</div>
+              <div>
+                <strong>Schedule For SNS</strong>
+                <span>{copy.loginEyebrow}</span>
+              </div>
+            </div>
+            <h1>Schedule For SNS</h1>
+            <p>{copy.loginLead}</p>
+            <div className="login-highlights">
+              {copy.loginHighlights.map((item: string) => (
+                <span key={item}>{item}</span>
+              ))}
+            </div>
+          </div>
+
+          <div className="login-card">
+            <LanguagePills copy={copy} locale={locale} onChange={changeLoginLocale} />
+
+            <button className="button primary login-button" onClick={handleThreadsLogin}>
+              {copy.loginButton}
+            </button>
+
+            <p className="muted-text">{copy.trialOffer}</p>
+          </div>
         </div>
       </div>
     );
@@ -489,18 +916,18 @@ function App() {
           <div className="brand-mark">S4S</div>
           <div>
             <strong>Schedule For SNS</strong>
-            <span>Threads scheduler</span>
+            <span>{copy.serviceSubtitle}</span>
           </div>
         </div>
 
         <div className="mobile-header-actions">
           <div className="mobile-trial-chip">
             <Clock3 size={15} />
-            <span>{billingLabel(subscriptionStatus, trialEnd)}</span>
+            <span>{billingLabel(displaySubscriptionStatus, trialEnd, copy)}</span>
           </div>
           <button
             aria-expanded={menuOpen}
-            aria-label="メニューを開閉"
+            aria-label={copy.menuToggle}
             className="hamburger-button"
             onClick={() => setMenuOpen((open) => !open)}
           >
@@ -508,20 +935,20 @@ function App() {
           </button>
         </div>
 
-        <nav className={`nav-stack ${menuOpen ? "open" : ""}`} aria-label="メイン">
-          <NavButton active={view === "calendar"} icon={CalendarDays} label="予約作成" onClick={() => { setView("calendar"); setMenuOpen(false); }} />
-          <NavButton active={view === "posts"} icon={FileText} label="予約一覧" onClick={() => { setView("posts"); setMenuOpen(false); }} />
-          <NavButton active={view === "analytics"} icon={BarChart3} label="分析" onClick={() => { setView("analytics"); setMenuOpen(false); }} />
-          <NavButton active={view === "settings"} icon={Settings} label="設定" onClick={() => { setView("settings"); setMenuOpen(false); }} />
+        <nav className={`nav-stack ${menuOpen ? "open" : ""}`} aria-label={copy.mainNav}>
+          <NavButton active={view === "calendar"} icon={CalendarDays} label={copy.nav.calendar} onClick={() => { setView("calendar"); setMenuOpen(false); }} />
+          <NavButton active={view === "posts"} icon={FileText} label={copy.nav.posts} onClick={() => { setView("posts"); setMenuOpen(false); }} />
+          <NavButton active={view === "analytics"} icon={BarChart3} label={copy.nav.analytics} onClick={() => { setView("analytics"); setMenuOpen(false); }} />
+          <NavButton active={view === "settings"} icon={Settings} label={copy.nav.settings} onClick={() => { setView("settings"); setMenuOpen(false); }} />
         </nav>
 
         <div className="trial-panel">
-          <span>{subscriptionStatus === "active" ? "サブスク有効" : "無料トライアル"}</span>
-          <strong>{billingLabel(subscriptionStatus, trialEnd)}</strong>
-          <small>{trialPeriodLabel(trialStartedAt, trialEnd)}</small>
+          <span>{displaySubscriptionStatus === "active" ? copy.billing.activeBadge : copy.billing.trial}</span>
+          <strong>{billingLabel(displaySubscriptionStatus, trialEnd, copy)}</strong>
+          <small>{trialPeriodLabel(trialStartedAt, trialEnd, copy)}</small>
           {canStartCheckout && (
             <button className="button secondary" onClick={() => void startCheckout()}>
-              今すぐ登録
+              {copy.billing.checkout}
             </button>
           )}
         </div>
@@ -531,49 +958,33 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">{headerDate}</p>
-            <h1>{viewTitle(view)}</h1>
+            <h1>{viewTitle(view, copy)}</h1>
           </div>
           <div className="topbar-actions">
-            <select
-              aria-label="表示言語"
-              value={locale}
-              onChange={(event) => {
-                const nextLocale = event.target.value;
-                setLocale(nextLocale);
-                void saveSettings(nextLocale, settingsTimezone);
-              }}
+            <button
+              className="icon-button"
+              title={copy.logout}
+              onClick={handleLogout}
             >
-              {localeLabels.map((locale) => (
-                <option key={locale.code} value={locale.code}>
-                  {locale.label}
-                </option>
-              ))}
-            </select>
-          <button
-            className="icon-button"
-            title="ログアウト"
-            onClick={handleLogout}
-          >
-            <LogOut size={18} />
-          </button>
-
+              <LogOut size={18} />
+            </button>
           </div>
         </header>
 
         <section className="notice-band">
           <ShieldCheck size={18} />
-          <span>Meta App Review向けに、投稿予約と基本分析に必要な最小スコープだけを使います。</span>
+          <span>{copy.notice}</span>
         </section>
 
         {!hasEffectiveSubscriptionEntitlement && (
           <section className="dialog-banner danger">
             <CreditCard size={20} />
             <div>
-              <strong>無料トライアルが終了しました</strong>
-              <span>{trialPeriodLabel(trialStartedAt, trialEnd)}。予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。</span>
+              <strong>{copy.billing.expiredTitle}</strong>
+              <span>{copy.billing.expiredBody(trialPeriodLabel(trialStartedAt, trialEnd, copy))}</span>
             </div>
             <button className="button dark" onClick={() => void startCheckout()}>
-              今すぐ登録
+              {copy.billing.checkout}
             </button>
           </section>
         )}
@@ -582,12 +993,12 @@ function App() {
           <section className="dialog-banner danger">
             <AlertTriangle size={20} />
             <div>
-              <strong>Threads再連携が必要です</strong>
-              <span>再連携が完了するまで予約作成と投稿実行は停止されます。</span>
+              <strong>{copy.reconnect.title}</strong>
+              <span>{copy.reconnect.body}</span>
             </div>
             <button className="button dark" onClick={handleThreadsReconnect}>
               <RefreshCcw size={16} />
-              再連携する
+              {copy.reconnect.button}
             </button>
           </section>
         )}
@@ -596,11 +1007,11 @@ function App() {
           <section className="dialog-banner">
             <PauseCircle size={20} />
             <div>
-              <strong>休止中です</strong>
-              <span>利用には再開が必要です。再開するまで予約・分析は停止されます。</span>
+              <strong>{copy.paused.title}</strong>
+              <span>{copy.paused.body}</span>
             </div>
             <button className="button dark" onClick={() => void changeAccountStatus("active")}>
-              再開する
+              {copy.paused.resume}
             </button>
           </section>
         )}
@@ -611,6 +1022,7 @@ function App() {
             draft={draft}
             editingId={editingId}
             isBlocked={isBlocked}
+            copy={copy}
             remainingSlots={remainingSlots}
             selectedDate={selectedDate}
             selectedPosts={selectedPosts}
@@ -623,16 +1035,17 @@ function App() {
         )}
 
         {view === "posts" && (
-          <PostsView posts={posts} onCloneFailed={cloneFailed} onDelete={deletePost} onEdit={beginEdit} />
+          <PostsView copy={copy} posts={posts} onCloneFailed={cloneFailed} onDelete={deletePost} onEdit={beginEdit} />
         )}
 
-        {view === "analytics" && <AnalyticsView analytics={analytics} engagement={engagement} postedPosts={postedPosts} />}
+        {view === "analytics" && <AnalyticsView analytics={analytics} copy={copy} engagement={engagement} postedPosts={postedPosts} />}
 
         {view === "settings" && (
           <SettingsView
             locale={locale}
             needsReconnect={needsReconnect}
             onDeleteAccount={deleteAccount}
+            onOpenLegalDocument={setSelectedLegalDocument}
             onReconnect={handleThreadsReconnect}
             onSaveSettings={saveSettings}
             onStartCheckout={startCheckout}
@@ -641,7 +1054,8 @@ function App() {
             setSettingsTimezone={setSettingsTimezone}
             settingsTimezone={settingsTimezone}
             canStartCheckout={canStartCheckout}
-            subscriptionStatus={subscriptionStatus}
+            copy={copy}
+            subscriptionStatus={displaySubscriptionStatus}
             trialStartedAt={trialStartedAt}
             trialEnd={trialEnd}
             userStatus={userStatus}
@@ -653,55 +1067,64 @@ function App() {
         <ConfirmDialog
           draft={draft}
           editingId={editingId}
+          copy={copy}
           onCancel={() => setShowConfirm(false)}
           onConfirm={saveDraft}
+        />
+      )}
+      {selectedLegalDocument && (
+        <LegalDocumentDialog
+          copy={copy}
+          document={selectedLegalDocument}
+          onClose={() => setSelectedLegalDocument(null)}
         />
       )}
     </div>
   );
 }
 
-function viewTitle(view: View) {
-  const titles: Record<View, string> = {
-    calendar: "予約作成",
-    posts: "予約一覧",
-    analytics: "投稿分析",
-    settings: "設定"
-  };
-  return titles[view];
+function viewTitle(view: View, copy: typeof uiText.ja) {
+  return copy.nav[view];
 }
 
-function formatHeaderDate(date: Date, timeZone: string) {
-  const dateText = new Intl.DateTimeFormat("ja-JP", {
+function formatHeaderDate(date: Date, timeZone: string, copy: typeof uiText.ja) {
+  const dateText = new Intl.DateTimeFormat(localeToDateFormat(copy), {
     year: "numeric",
     month: "long",
     day: "numeric",
     timeZone,
   }).format(date);
-  const weekday = new Intl.DateTimeFormat("ja-JP", {
+  const weekday = new Intl.DateTimeFormat(localeToDateFormat(copy), {
     weekday: "long",
     timeZone,
   }).format(date);
   return `${dateText} ${weekday}`;
 }
 
-function billingLabel(status: SubscriptionStatus, trialEnd: number | null) {
-  if (status === "active") return "登録済み";
-  if (status === "trial_expired") return "トライアル終了";
-  if (status !== "trialing") return "登録が必要";
-  if (!trialEnd) return "トライアル中";
+function billingLabel(status: SubscriptionStatus, trialEnd: number | null, copy: typeof uiText.ja) {
+  if (status === "active") return copy.billing.active;
+  if (status === "trial_expired") return copy.billing.trialExpired;
+  if (status !== "trialing") return copy.billing.required;
+  if (!trialEnd) return copy.billing.trialing;
 
   const remainingSeconds = Math.max(0, trialEnd - Math.floor(Date.now() / 1000));
-  if (remainingSeconds <= 0) return "トライアル終了";
+  if (remainingSeconds <= 0) return copy.billing.trialExpired;
 
   const days = Math.floor(remainingSeconds / 86400);
   const hours = Math.floor((remainingSeconds % 86400) / 3600);
-  return `残り${days}日 ${hours}時間`;
+  return copy.billing.remaining(days, hours);
 }
 
-function formatUnixDate(timestamp: number | null) {
-  if (!timestamp) return "未設定";
-  return new Intl.DateTimeFormat("ja-JP", {
+function billingStatusLabel(status: SubscriptionStatus, copy: typeof uiText.ja) {
+  if (status === "active") return copy.billing.active;
+  if (status === "trialing") return copy.billing.trialing;
+  if (status === "trial_expired") return copy.billing.trialExpired;
+  return copy.billing.required;
+}
+
+function formatUnixDate(timestamp: number | null, copy: typeof uiText.ja) {
+  if (!timestamp) return copy.billing.unset;
+  return new Intl.DateTimeFormat(localeToDateFormat(copy), {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -710,8 +1133,45 @@ function formatUnixDate(timestamp: number | null) {
   }).format(new Date(timestamp * 1000));
 }
 
-function trialPeriodLabel(startedAt: number | null, trialEnd: number | null) {
-  return `開始 ${formatUnixDate(startedAt)} / 終了 ${formatUnixDate(trialEnd)}`;
+function trialPeriodLabel(startedAt: number | null, trialEnd: number | null, copy: typeof uiText.ja) {
+  return copy.billing.period(formatUnixDate(startedAt, copy), formatUnixDate(trialEnd, copy));
+}
+
+function localeToDateFormat(copy: typeof uiText.ja) {
+  if (copy === uiText.ja) return "ja-JP";
+  if (copy === uiText.zh) return "zh-CN";
+  if (copy === uiText.vi) return "vi-VN";
+  if (copy === uiText.fil) return "fil-PH";
+  return "en-US";
+}
+
+function LanguagePills({
+  copy,
+  locale,
+  onChange
+}: {
+  copy: typeof uiText.ja;
+  locale: string;
+  onChange: (locale: string) => void;
+}) {
+  return (
+    <div className="language-panel" aria-label={copy.loginLanguage}>
+      <span>{copy.loginLanguage}</span>
+      <div className="language-pills">
+        {localeLabels.map((item) => (
+          <button
+            className={`language-pill ${locale === item.code ? "active" : ""}`}
+            key={item.code}
+            onClick={() => onChange(item.code)}
+            type="button"
+          >
+            <span aria-hidden="true">{item.flag}</span>
+            {item.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function NavButton({
@@ -735,6 +1195,7 @@ function NavButton({
 
 function CalendarView({
   activePosts,
+  copy,
   draft,
   editingId,
   isBlocked,
@@ -748,6 +1209,7 @@ function CalendarView({
   visibleMonth
 }: {
   activePosts: ScheduledPost[];
+  copy: typeof uiText.ja;
   draft: { date: string; time: string; timezone: string; content: string };
   editingId: string | null;
   isBlocked: boolean;
@@ -768,10 +1230,10 @@ function CalendarView({
   const maxDate = getMaxReservableDate();
 
   const submitDisabledReason = (() => {
-    if (isBlocked) return "現在は予約できません";
-    if (isFull) return "この日は予約上限の3件に達しています";
-    if (isDateTimeMissing) return "投稿日時を選択してください";
-    if (isContentEmpty) return "投稿本文を入力してください";
+    if (isBlocked) return copy.calendar.blocked;
+    if (isFull) return copy.calendar.full;
+    if (isDateTimeMissing) return copy.calendar.missingDateTime;
+    if (isContentEmpty) return copy.calendar.emptyContent;
     return "";
   })();
 
@@ -781,26 +1243,23 @@ function CalendarView({
       <section className="panel calendar-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Calendar</p>
-            <h2>日付を選択</h2>
+            <p className="eyebrow">{copy.calendar.eyebrow}</p>
+            <h2>{copy.calendar.title}</h2>
           </div>
-          <span className="pill">{remainingSlots}/3 枠</span>
+          <span className="pill">{copy.calendar.slots(remainingSlots)}</span>
         </div>
         <div className="month-controls">
           <label>
-            表示月
+            {copy.calendar.monthLabel}
             <select
               value={visibleMonth}
               onChange={(event) => setVisibleMonth(event.target.value)}
             >
-              {buildReservableMonths().map((value) => {
-                const [y, m] = value.split("-");
-                return (
-                  <option key={value} value={value}>
-                    {y}年{Number(m)}月
-                  </option>
-                );
-              })}
+              {buildReservableMonths().map((value) => (
+                <option key={value} value={value}>
+                  {formatMonthLabel(value, copy)}
+                </option>
+              ))}
             </select>
           </label>
         </div>
@@ -824,23 +1283,23 @@ function CalendarView({
               }}
               title={
                 isOutOfRange
-                  ? "予約できるのは今日から30日以内です"
+                  ? copy.calendar.outsideRange
                   : isFullDate
-                    ? "この日は予約上限の3件に達しています"
+                    ? copy.calendar.full
                     : ""
               }
             >
               <strong>{date.slice(8)}</strong>
-              <span>{weekdayLabel(date)}</span>
-              <small>{count} 件</small>
+              <span>{weekdayLabel(date, copy)}</span>
+              <small>{copy.calendar.dayCount(count)}</small>
             </button>
           );
         })}
         </div>
         <div className="day-list">
-          <h3>選択日の予約</h3>
+          <h3>{copy.calendar.selectedDay}</h3>
           {selectedPosts.length === 0 ? (
-            <p className="muted-text">この日の予約はまだありません。</p>
+            <p className="muted-text">{copy.calendar.noPosts}</p>
           ) : (
             selectedPosts.map((post) => (
               <div className="compact-row" key={post.id}>
@@ -856,14 +1315,14 @@ function CalendarView({
       <section className="panel composer-panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">{editingId ? "Edit" : "New post"}</p>
-            <h2>{editingId ? "予約を編集" : "投稿を予約"}</h2>
+            <p className="eyebrow">{editingId ? copy.calendar.edit : copy.calendar.newPost}</p>
+            <h2>{editingId ? copy.calendar.editTitle : copy.calendar.composeTitle}</h2>
           </div>
-          <span className="pill muted">5分以内不可</span>
+          <span className="pill muted">{copy.calendar.minLead}</span>
         </div>
         <div className="form-grid">
           <label>
-            日付
+            {copy.calendar.date}
             <input
               type="date"
               min={getTodayDate()}
@@ -873,11 +1332,11 @@ function CalendarView({
             />
           </label>
           <label>
-            時刻
+            {copy.calendar.time}
             <input type="time" value={draft.time} onChange={(event) => setDraft({ ...draft, time: event.target.value })} />
           </label>
           <label className="wide">
-            タイムゾーン
+            {copy.calendar.timezone}
             <select value={draft.timezone} onChange={(event) => setDraft({ ...draft, timezone: event.target.value })}>
               <option value="Asia/Tokyo">Asia/Tokyo</option>
               <option value="America/Los_Angeles">America/Los_Angeles</option>
@@ -887,10 +1346,10 @@ function CalendarView({
             </select>
           </label>
           <label className="wide">
-            投稿本文
+            {copy.calendar.content}
             <textarea
               maxLength={500}
-              placeholder="Threadsへ投稿する本文を入力"
+              placeholder={copy.calendar.placeholder}
               value={draft.content}
               onChange={(event) => setDraft({ ...draft, content: event.target.value })}
             />
@@ -902,9 +1361,9 @@ function CalendarView({
             className="button primary"
             disabled={!canSubmit}
             onClick={() => setShowConfirm(true)}
-            title={submitDisabledReason || "予約内容を確認します"}
+            title={submitDisabledReason || copy.calendar.validTitle}
           >
-            予約内容を確認
+            {copy.calendar.confirm}
           </button>
           {!canSubmit && (
             <p className="form-hint error">
@@ -918,11 +1377,13 @@ function CalendarView({
 }
 
 function PostsView({
+  copy,
   posts,
   onCloneFailed,
   onDelete,
   onEdit
 }: {
+  copy: typeof uiText.ja;
   posts: ScheduledPost[];
   onCloneFailed: (post: ScheduledPost) => void;
   onDelete: (id: string) => void;
@@ -935,15 +1396,15 @@ function PostsView({
     <section className="panel">
       <div className="section-heading">
         <div>
-          <p className="eyebrow">Posts</p>
-          <h2>予約と投稿履歴</h2>
+          <p className="eyebrow">{copy.posts.eyebrow}</p>
+          <h2>{copy.posts.title}</h2>
         </div>
         <label className="sort-control">
-          並び替え
+          {copy.posts.sort}
           <select value={sort} onChange={(event) => setSort(event.target.value as PostSort)}>
-            <option value="newest">新しい順</option>
-            <option value="oldest">古い順</option>
-            <option value="status">ステータス順</option>
+            <option value="newest">{copy.posts.newest}</option>
+            <option value="oldest">{copy.posts.oldest}</option>
+            <option value="status">{copy.posts.status}</option>
           </select>
         </label>
       </div>
@@ -961,7 +1422,7 @@ function PostsView({
                   <span>{post.date}</span>
                   <span>{post.time}</span>
                   <span>{post.timezone}</span>
-                  <strong>{meta.label}</strong>
+                  <strong>{copy.postStatus[post.status]}</strong>
                 </div>
                 <p>{post.content}</p>
                 {post.failureReason && <small className="failure-text">{post.failureReason}</small>}
@@ -969,10 +1430,10 @@ function PostsView({
               <div className="row-actions">
                 {post.status === "scheduled" && (
                   <>
-                    <button className="icon-button" title="編集" onClick={() => onEdit(post)}>
+                    <button className="icon-button" title={copy.posts.edit} onClick={() => onEdit(post)}>
                       <Edit3 size={17} />
                     </button>
-                    <button className="icon-button" title="削除" onClick={() => onDelete(post.id)}>
+                    <button className="icon-button" title={copy.posts.delete} onClick={() => onDelete(post.id)}>
                       <Trash2 size={17} />
                     </button>
                   </>
@@ -980,7 +1441,7 @@ function PostsView({
                 {post.status === "failed" && (
                   <button className="button secondary" onClick={() => onCloneFailed(post)}>
                     <RefreshCcw size={16} />
-                    同じ本文で予約
+                    {copy.posts.cloneFailed}
                   </button>
                 )}
               </div>
@@ -1012,6 +1473,14 @@ function buildReservableMonths() {
   return months;
 }
 
+function formatMonthLabel(month: string, copy: typeof uiText.ja) {
+  const [year, monthIndex] = month.split("-").map(Number);
+  return new Intl.DateTimeFormat(localeToDateFormat(copy), {
+    year: "numeric",
+    month: "long",
+  }).format(new Date(year, monthIndex - 1, 1));
+}
+
 function buildMonthDates(month: string) {
   const [year, monthIndex] = month.split("-").map(Number);
   const lastDay = new Date(year, monthIndex, 0).getDate();
@@ -1021,8 +1490,8 @@ function buildMonthDates(month: string) {
   });
 }
 
-function weekdayLabel(date: string) {
-  const formatter = new Intl.DateTimeFormat("ja-JP", { weekday: "short" });
+function weekdayLabel(date: string, copy: typeof uiText.ja) {
+  const formatter = new Intl.DateTimeFormat(localeToDateFormat(copy), { weekday: "short" });
   return formatter.format(new Date(`${date}T00:00:00+09:00`));
 }
 
@@ -1050,20 +1519,22 @@ function postTimestamp(post: ScheduledPost) {
 
 function AnalyticsView({
   analytics,
+  copy,
   engagement,
   postedPosts
 }: {
   analytics: { views: number; likes: number; replies: number; reposts: number; quotes: number; shares: number };
+  copy: typeof uiText.ja;
   engagement: number;
   postedPosts: ScheduledPost[];
 }) {
   const statItems = [
-    { label: "閲覧", value: analytics.views },
-    { label: "いいね", value: analytics.likes },
-    { label: "返信", value: analytics.replies },
-    { label: "リポスト", value: analytics.reposts },
-    { label: "引用", value: analytics.quotes },
-    { label: "シェア", value: analytics.shares }
+    { label: copy.analytics.views, value: analytics.views },
+    { label: copy.analytics.likes, value: analytics.likes },
+    { label: copy.analytics.replies, value: analytics.replies },
+    { label: copy.analytics.reposts, value: analytics.reposts },
+    { label: copy.analytics.quotes, value: analytics.quotes },
+    { label: copy.analytics.shares, value: analytics.shares }
   ];
 
   return (
@@ -1076,17 +1547,17 @@ function AnalyticsView({
           </div>
         ))}
         <div className="metric strong">
-          <span>合計エンゲージメント</span>
+          <span>{copy.analytics.engagement}</span>
           <strong>{engagement.toLocaleString()}</strong>
         </div>
       </section>
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Ranking</p>
-            <h2>反応が良かった投稿</h2>
+            <p className="eyebrow">{copy.analytics.eyebrow}</p>
+            <h2>{copy.analytics.title}</h2>
           </div>
-          <span className="pill muted">累計値</span>
+          <span className="pill muted">{copy.analytics.cumulative}</span>
         </div>
         <div className="post-list">
           {postedPosts.map((post) => (
@@ -1127,6 +1598,7 @@ function SettingsView({
   locale,
   needsReconnect,
   onDeleteAccount,
+  onOpenLegalDocument,
   onReconnect,
   onSaveSettings,
   onStartCheckout,
@@ -1135,6 +1607,7 @@ function SettingsView({
   setSettingsTimezone,
   settingsTimezone,
   canStartCheckout,
+  copy,
   subscriptionStatus,
   trialStartedAt,
   trialEnd,
@@ -1143,6 +1616,7 @@ function SettingsView({
   locale: string;
   needsReconnect: boolean;
   onDeleteAccount: () => Promise<void>;
+  onOpenLegalDocument: (document: LegalDocument) => void;
   onReconnect: () => void;
   onSaveSettings: (nextLocale?: string, nextTimezone?: string) => Promise<void>;
   onStartCheckout: () => Promise<void>;
@@ -1151,24 +1625,27 @@ function SettingsView({
   setSettingsTimezone: (timezone: string) => void;
   settingsTimezone: string;
   canStartCheckout: boolean;
+  copy: typeof uiText.ja;
   subscriptionStatus: SubscriptionStatus;
   trialStartedAt: number | null;
   trialEnd: number | null;
   userStatus: UserStatus;
 }) {
+  const canManagePaidAccount = subscriptionStatus === "active";
+
   return (
     <div className="settings-layout">
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Account</p>
-            <h2>連携と状態</h2>
+            <p className="eyebrow">{copy.settings.eyebrow}</p>
+            <h2>{copy.settings.title}</h2>
           </div>
         </div>
         <div className="settings-list">
           <label className="setting-control">
             <Globe2 size={18} />
-            <span>表示言語</span>
+            <span>{copy.settings.locale}</span>
             <select
               value={locale}
               onChange={(event) => {
@@ -1179,14 +1656,14 @@ function SettingsView({
             >
               {localeLabels.map((item) => (
                 <option key={item.code} value={item.code}>
-                  {item.label}
+                  {item.flag} {item.label}
                 </option>
               ))}
             </select>
           </label>
           <label className="setting-control">
             <Clock3 size={18} />
-            <span>タイムゾーン</span>
+            <span>{copy.settings.timezone}</span>
             <select
               value={settingsTimezone}
               onChange={(event) => {
@@ -1202,68 +1679,149 @@ function SettingsView({
               <option value="Asia/Ho_Chi_Minh">Asia/Ho_Chi_Minh</option>
             </select>
           </label>
-          <SettingRow icon={RefreshCcw} label="Threads連携" value={needsReconnect ? "再連携が必要" : "有効"} />
-          <SettingRow icon={PauseCircle} label="利用状態" value={userStatus === "paused" ? "休止中" : "有効"} />
-          <SettingRow icon={CreditCard} label="課金状態" value={billingLabel(subscriptionStatus, trialEnd)} />
-          <SettingRow icon={Clock3} label="トライアル期間" value={trialPeriodLabel(trialStartedAt, trialEnd)} />
+          <SettingRow
+            action={
+              needsReconnect ? (
+                <button className="button secondary compact" onClick={onReconnect}>
+                  <RefreshCcw size={16} />
+                  {copy.reconnect.shortButton}
+                </button>
+              ) : undefined
+            }
+            icon={RefreshCcw}
+            label={copy.settings.threads}
+            value={needsReconnect ? copy.reconnect.needed : copy.reconnect.enabled}
+          />
+          <SettingRow icon={PauseCircle} label={copy.settings.userStatus} value={userStatus === "paused" ? copy.paused.paused : copy.paused.active} />
+          <SettingRow icon={CreditCard} label={copy.settings.billingStatus} value={billingStatusLabel(subscriptionStatus, copy)} />
+          <SettingRow icon={Clock3} label={copy.settings.trialPeriod} value={trialPeriodLabel(trialStartedAt, trialEnd, copy)} />
         </div>
         <div className="button-row">
           {canStartCheckout && (
             <button className="button primary" onClick={() => void onStartCheckout()}>
               <CreditCard size={16} />
-              今すぐ登録
+              {copy.billing.checkout}
             </button>
           )}
-          <button className="button secondary" onClick={onReconnect}>
-            <RefreshCcw size={16} />
-            Threads再連携
-          </button>
-          <button
-            className="button secondary"
-            onClick={() => void onStatusChange(userStatus === "paused" ? "active" : "paused")}
-          >
-            <PauseCircle size={16} />
-            {userStatus === "paused" ? "再開する" : "休止にする"}
-          </button>
-          <button className="button danger" onClick={() => void onDeleteAccount()}>
-            <Trash2 size={16} />
-            退会
-          </button>
+          {canManagePaidAccount && (
+            <>
+              <button
+                className="button secondary"
+                onClick={() => void onStatusChange(userStatus === "paused" ? "active" : "paused")}
+              >
+                <PauseCircle size={16} />
+                {userStatus === "paused" ? copy.paused.resume : copy.paused.pause}
+              </button>
+              <button className="button danger" onClick={() => void onDeleteAccount()}>
+                <Trash2 size={16} />
+                {copy.settings.delete}
+              </button>
+            </>
+          )}
         </div>
+        {canManagePaidAccount && (
+          <div className="account-action-notes">
+            <p>{copy.settings.pauseNote}</p>
+            <p>{copy.settings.deleteNote}</p>
+          </div>
+        )}
       </section>
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Legal</p>
-            <h2>法務文書</h2>
+            <p className="eyebrow">{copy.settings.legalEyebrow}</p>
+            <h2>{copy.settings.legalTitle}</h2>
           </div>
         </div>
         <div className="legal-links">
-          <a href="/docs/legal-policies.md">特定商取引法に基づく表記</a>
-          <a href="/docs/legal-policies.md">利用規約</a>
-          <a href="/docs/legal-policies.md">プライバシーポリシー</a>
+          <button type="button" onClick={() => onOpenLegalDocument("commerce")}>
+            {copy.legal.commerce}
+          </button>
+          <button type="button" onClick={() => onOpenLegalDocument("terms")}>
+            {copy.legal.terms}
+          </button>
+          <button type="button" onClick={() => onOpenLegalDocument("privacy")}>
+            {copy.legal.privacy}
+          </button>
         </div>
       </section>
     </div>
   );
 }
 
-function SettingRow({ icon: Icon, label, value }: { icon: typeof Globe2; label: string; value: string }) {
+function LegalDocumentDialog({
+  copy,
+  document,
+  onClose,
+}: {
+  copy: typeof uiText.ja;
+  document: LegalDocument;
+  onClose: () => void;
+}) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel legal-modal" role="dialog" aria-modal="true" aria-labelledby="legal-title">
+        <h2 id="legal-title">{copy.legal[document]}</h2>
+        <div className="legal-document-text">
+          {legalDocumentBody(document)}
+        </div>
+        <div className="button-row end">
+          <button className="button primary" onClick={onClose}>
+            {copy.settings.close}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function legalDocumentBody(document: LegalDocument) {
+  const headings = Object.values(legalDocuments).map((item) => item.heading);
+  const heading = legalDocuments[document].heading;
+  const start = legalPoliciesText.indexOf(heading);
+  if (start < 0) return legalPoliciesText;
+
+  const nextHeadingStart = headings
+    .filter((item) => item !== heading)
+    .map((item) => legalPoliciesText.indexOf(item, start + heading.length))
+    .filter((index) => index > start)
+    .sort((a, b) => a - b)[0];
+
+  const body = legalPoliciesText.slice(start, nextHeadingStart ?? undefined);
+  return body.replace(/^##\s*/, "").trim();
+}
+
+function SettingRow({
+  action,
+  icon: Icon,
+  label,
+  value
+}: {
+  action?: ReactNode;
+  icon: typeof Globe2;
+  label: string;
+  value: string;
+}) {
   return (
     <div className="setting-row">
       <Icon size={18} />
       <span>{label}</span>
-      <strong>{value}</strong>
+      <div className="setting-row-value">
+        <strong>{value}</strong>
+        {action}
+      </div>
     </div>
   );
 }
 
 function ConfirmDialog({
+  copy,
   draft,
   editingId,
   onCancel,
   onConfirm
 }: {
+  copy: typeof uiText.ja;
   draft: { date: string; time: string; timezone: string; content: string };
   editingId: string | null;
   onCancel: () => void;
@@ -1272,29 +1830,29 @@ function ConfirmDialog({
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-        <h2 id="confirm-title">{editingId ? "編集内容を確認" : "予約内容を確認"}</h2>
+        <h2 id="confirm-title">{editingId ? copy.settings.confirmEditTitle : copy.settings.confirmTitle}</h2>
         <dl className="confirm-list">
           <div>
-            <dt>日時</dt>
+            <dt>{copy.settings.dateTime}</dt>
             <dd>
               {draft.date} {draft.time}
             </dd>
           </div>
           <div>
-            <dt>タイムゾーン</dt>
+            <dt>{copy.settings.timezone}</dt>
             <dd>{draft.timezone}</dd>
           </div>
           <div>
-            <dt>本文</dt>
+            <dt>{copy.settings.body}</dt>
             <dd>{draft.content}</dd>
           </div>
         </dl>
         <div className="button-row end">
           <button className="button secondary" onClick={onCancel}>
-            戻る
+            {copy.settings.back}
           </button>
           <button className="button primary" onClick={onConfirm}>
-            {editingId ? "更新する" : "予約する"}
+            {editingId ? copy.settings.update : copy.settings.reserve}
           </button>
         </div>
       </section>
