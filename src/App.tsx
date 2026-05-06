@@ -15,12 +15,13 @@ import {
   Settings,
   ShieldCheck,
   Trash2,
+  Wrench,
   XCircle
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import legalPoliciesText from "../docs/legal-policies.md?raw";
 
-type View = "calendar" | "posts" | "analytics" | "settings";
+type View = "calendar" | "posts" | "analytics" | "settings" | "developer";
 type LegalDocument = "commerce" | "terms" | "privacy";
 type LocaleCode = "ja" | "en" | "zh" | "fil" | "vi";
 type PostStatus = "scheduled" | "posted" | "failed" | "canceled";
@@ -77,7 +78,7 @@ const uiText: Record<LocaleCode, any> = {
     menuToggle: "メニューを開閉",
     mainNav: "メイン",
     logout: "ログアウト",
-    nav: { calendar: "予約作成", posts: "予約一覧", analytics: "分析", settings: "設定" },
+    nav: { calendar: "予約作成", posts: "予約一覧", analytics: "分析", settings: "設定", developer: "開発者" },
     billing: {
       active: "登録済み",
       activeBadge: "サブスク有効",
@@ -173,8 +174,8 @@ const uiText: Record<LocaleCode, any> = {
       userStatus: "利用状態",
       billingStatus: "課金状態",
       trialPeriod: "トライアル期間",
-      pauseNote: "休止: アカウントを残したまま予約作成、投稿実行、分析取得を停止します。再開すると利用を戻せます。",
-      deleteNote: "退会: サブスクリプションを終了し、未投稿予約、投稿本文、分析データ、Threads連携情報を削除します。",
+      pauseNote: "休止: アカウントを残したまま、本アプリでの予約作成、投稿実行、分析取得を停止します。Threads本体の投稿は削除されません。",
+      deleteNote: "退会: サブスクリプションを終了し、本アプリ上の未投稿予約、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。",
       delete: "退会",
       legalEyebrow: "Legal",
       legalTitle: "法務文書",
@@ -187,6 +188,13 @@ const uiText: Record<LocaleCode, any> = {
       reserve: "予約する",
       update: "更新する",
     },
+    developer: {
+      eyebrow: "Developer",
+      title: "開発者画面",
+      threadsId: "Threads ID",
+      adminReview: "管理者確認",
+      adminReviewBody: "Stripeキャンセル失敗など、手動確認が必要な状態をここから確認できるようにします。",
+    },
     legal: {
       commerce: "特定商取引法に基づく表記",
       terms: "利用規約",
@@ -195,7 +203,7 @@ const uiText: Record<LocaleCode, any> = {
     alerts: {
       saveSettingsFailed: "設定の保存に失敗しました",
       statusChangeFailed: "利用状態の変更に失敗しました",
-      deleteConfirm: "退会すると未投稿予約、投稿本文、分析データ、Threads連携情報を削除します。退会しますか？",
+      deleteConfirm: "退会すると本アプリ上の未投稿予約、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。退会しますか？",
       deleteFailed: "退会処理に失敗しました",
       checkoutFailed: "Checkoutの開始に失敗しました",
       contentRequired: "投稿本文を入力してください",
@@ -218,7 +226,7 @@ const uiText: Record<LocaleCode, any> = {
     menuToggle: "Toggle menu",
     mainNav: "Main",
     logout: "Log out",
-    nav: { calendar: "Schedule", posts: "Posts", analytics: "Analytics", settings: "Settings" },
+    nav: { calendar: "Schedule", posts: "Posts", analytics: "Analytics", settings: "Settings", developer: "Developer" },
     billing: {
       active: "Subscribed",
       activeBadge: "Subscription active",
@@ -314,8 +322,8 @@ const uiText: Record<LocaleCode, any> = {
       userStatus: "Account status",
       billingStatus: "Billing status",
       trialPeriod: "Trial period",
-      pauseNote: "Pause: Keep the account but stop scheduling, publishing, and analytics. You can resume later.",
-      deleteNote: "Delete account: End the subscription and delete pending schedules, post text, analytics data, and Threads connection data.",
+      pauseNote: "Pause: Keep the account but stop scheduling, publishing, and analytics in this app. Posts already published on Threads are not deleted.",
+      deleteNote: "Delete account: End the subscription and delete this app's pending schedules, posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted.",
       delete: "Delete account",
       legalEyebrow: "Legal",
       legalTitle: "Legal documents",
@@ -328,6 +336,13 @@ const uiText: Record<LocaleCode, any> = {
       reserve: "Schedule",
       update: "Update",
     },
+    developer: {
+      eyebrow: "Developer",
+      title: "Developer screen",
+      threadsId: "Threads ID",
+      adminReview: "Admin review",
+      adminReviewBody: "Manual review items such as failed Stripe cancellations will be checked here.",
+    },
     legal: {
       commerce: "Specified Commercial Transaction Act notice",
       terms: "Terms of Use",
@@ -336,7 +351,7 @@ const uiText: Record<LocaleCode, any> = {
     alerts: {
       saveSettingsFailed: "Failed to save settings",
       statusChangeFailed: "Failed to change account status",
-      deleteConfirm: "Deleting your account will remove pending schedules, post text, analytics data, and Threads connection data. Continue?",
+      deleteConfirm: "Deleting your account will remove this app's pending schedules, posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted. Continue?",
       deleteFailed: "Failed to delete account",
       checkoutFailed: "Failed to start Checkout",
       contentRequired: "Enter post text",
@@ -362,7 +377,7 @@ uiText.zh = {
   loginHighlights: ["最多可预约30天后", "每天最多预约3条帖子", "查看基础分析"],
   mainNav: "主导航",
   logout: "退出登录",
-  nav: { calendar: "预约", posts: "帖子", analytics: "分析", settings: "设置" },
+  nav: { calendar: "预约", posts: "帖子", analytics: "分析", settings: "设置", developer: "开发者" },
   billing: {
     ...uiText.en.billing,
     active: "已订阅",
@@ -386,6 +401,7 @@ uiText.zh = {
   postStatus: { scheduled: "已预约", posted: "已发布", failed: "失败", canceled: "已取消" },
   analytics: { ...uiText.en.analytics, views: "浏览", likes: "赞", replies: "回复", reposts: "转发", quotes: "引用", shares: "分享", engagement: "总互动", title: "表现较好的帖子", cumulative: "累计" },
   settings: { ...uiText.en.settings, title: "连接与状态", locale: "显示语言", timezone: "时区", threads: "Threads连接", userStatus: "使用状态", billingStatus: "账单状态", trialPeriod: "试用期间", delete: "退会", legalTitle: "法律文件", close: "关闭", dateTime: "日期时间", body: "正文", back: "返回", reserve: "预约", update: "更新" },
+  developer: { ...uiText.en.developer, title: "开发者页面", threadsId: "Threads ID", adminReview: "管理员确认" },
   legal: { commerce: "特定商业交易法标识", terms: "使用条款", privacy: "隐私政策" },
   alerts: { ...uiText.en.alerts, saveSettingsFailed: "设置保存失败", statusChangeFailed: "状态变更失败", deleteFailed: "退会处理失败", checkoutFailed: "Checkout启动失败", contentRequired: "请输入帖子内容", scheduleFailed: "预约失败", scheduled: "已预约。", updated: "预约已更新。", deletePostConfirm: "要删除这个预约吗？", postDeleteFailed: "删除失败" },
 };
@@ -400,7 +416,7 @@ uiText.fil = {
   loginHighlights: ["Mag-schedule hanggang 30 araw ahead", "Hanggang 3 scheduled posts bawat araw", "Tingnan ang basic analytics"],
   mainNav: "Pangunahing menu",
   logout: "Mag-log out",
-  nav: { calendar: "Schedule", posts: "Posts", analytics: "Analytics", settings: "Settings" },
+  nav: { calendar: "Schedule", posts: "Posts", analytics: "Analytics", settings: "Settings", developer: "Developer" },
   billing: { ...uiText.en.billing, trial: "Free trial", trialing: "Nasa trial", checkout: "Mag-subscribe ngayon", remaining: (days: number, hours: number) => `${days} araw ${hours} oras pa`, period: (start: string, end: string) => `Simula ${start} / Wakas ${end}` },
   notice: "Para sa Meta App Review, minimum scopes lang ang ginagamit para sa scheduled posts at basic analytics.",
   reconnect: { ...uiText.en.reconnect, title: "Kailangan muling ikonekta ang Threads", body: "Naka-pause ang scheduling at publishing hanggang makumpleto ang reconnect.", button: "Reconnect", shortButton: "Reconnect", needed: "Kailangan reconnect", enabled: "Connected" },
@@ -410,6 +426,7 @@ uiText.fil = {
   postStatus: { scheduled: "Scheduled", posted: "Posted", failed: "Failed", canceled: "Canceled" },
   analytics: { ...uiText.en.analytics, views: "Views", likes: "Likes", replies: "Replies", reposts: "Reposts", quotes: "Quotes", shares: "Shares", engagement: "Total engagement", title: "Pinakamagandang posts", cumulative: "Cumulative" },
   settings: { ...uiText.en.settings, title: "Connection at status", locale: "Display language", timezone: "Time zone", threads: "Threads connection", userStatus: "Account status", billingStatus: "Billing status", trialPeriod: "Trial period", delete: "Delete account", legalTitle: "Legal documents", close: "Close", dateTime: "Petsa at oras", body: "Text", back: "Back", reserve: "Schedule", update: "Update" },
+  developer: uiText.en.developer,
   legal: { commerce: "Commercial transaction notice", terms: "Terms of Use", privacy: "Privacy Policy" },
 };
 
@@ -423,7 +440,7 @@ uiText.vi = {
   loginHighlights: ["Lên lịch trước tối đa 30 ngày", "Tối đa 3 bài đã lên lịch mỗi ngày", "Xem phân tích cơ bản"],
   mainNav: "Điều hướng chính",
   logout: "Đăng xuất",
-  nav: { calendar: "Lên lịch", posts: "Bài đăng", analytics: "Phân tích", settings: "Cài đặt" },
+  nav: { calendar: "Lên lịch", posts: "Bài đăng", analytics: "Phân tích", settings: "Cài đặt", developer: "Developer" },
   billing: { ...uiText.en.billing, trial: "Dùng thử miễn phí", trialing: "Đang dùng thử", checkout: "Đăng ký ngay", remaining: (days: number, hours: number) => `Còn ${days} ngày ${hours} giờ`, period: (start: string, end: string) => `Bắt đầu ${start} / Kết thúc ${end}` },
   notice: "Để phục vụ Meta App Review, ứng dụng chỉ dùng các quyền tối thiểu cần cho lên lịch và phân tích cơ bản.",
   reconnect: { ...uiText.en.reconnect, title: "Cần kết nối lại Threads", body: "Lên lịch và đăng bài sẽ tạm dừng cho đến khi kết nối lại hoàn tất.", button: "Kết nối lại", shortButton: "Kết nối lại", needed: "Cần kết nối lại", enabled: "Đã kết nối" },
@@ -433,6 +450,7 @@ uiText.vi = {
   postStatus: { scheduled: "Đã lên lịch", posted: "Đã đăng", failed: "Thất bại", canceled: "Đã hủy" },
   analytics: { ...uiText.en.analytics, views: "Lượt xem", likes: "Thích", replies: "Trả lời", reposts: "Đăng lại", quotes: "Trích dẫn", shares: "Chia sẻ", engagement: "Tổng tương tác", title: "Bài đăng hiệu quả", cumulative: "Tổng cộng" },
   settings: { ...uiText.en.settings, title: "Kết nối và trạng thái", locale: "Ngôn ngữ hiển thị", timezone: "Múi giờ", threads: "Kết nối Threads", userStatus: "Trạng thái tài khoản", billingStatus: "Trạng thái thanh toán", trialPeriod: "Thời gian dùng thử", delete: "Xóa tài khoản", legalTitle: "Tài liệu pháp lý", close: "Đóng", dateTime: "Ngày giờ", body: "Nội dung", back: "Quay lại", reserve: "Lên lịch", update: "Cập nhật" },
+  developer: uiText.en.developer,
   legal: { commerce: "Thông báo giao dịch thương mại", terms: "Điều khoản sử dụng", privacy: "Chính sách quyền riêng tư" },
 };
 
@@ -507,6 +525,8 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
   const [needsReconnect, setNeedsReconnect] = useState(false);
+  const [isDeveloper, setIsDeveloper] = useState(false);
+  const [threadsUserId, setThreadsUserId] = useState("");
   const [selectedLegalDocument, setSelectedLegalDocument] = useState<LegalDocument | null>(null);
   const [locale, setLocale] = useState<string>(initialLocale);
   const copy = uiText[locale as LocaleCode] ?? uiText.ja;
@@ -715,6 +735,8 @@ function App() {
         console.log("ME RESULT", data);
   
         setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
+        setIsDeveloper(Boolean(data.is_developer ?? data.isDeveloper ?? false));
+        setThreadsUserId(data.threads_user_id ?? data.threadsUserId ?? "");
         setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
         setSubscriptionStatus(data.subscription_status ?? "trialing");
         setTrialStartedAt(data.trial_started_at ?? null);
@@ -941,6 +963,9 @@ function App() {
           <NavButton active={view === "posts"} icon={FileText} label={copy.nav.posts} onClick={() => { setView("posts"); setMenuOpen(false); }} />
           <NavButton active={view === "analytics"} icon={BarChart3} label={copy.nav.analytics} onClick={() => { setView("analytics"); setMenuOpen(false); }} />
           <NavButton active={view === "settings"} icon={Settings} label={copy.nav.settings} onClick={() => { setView("settings"); setMenuOpen(false); }} />
+          {isDeveloper && (
+            <NavButton active={view === "developer"} icon={Wrench} label={copy.nav.developer} onClick={() => { setView("developer"); setMenuOpen(false); }} />
+          )}
         </nav>
 
         <div className="trial-panel">
@@ -1061,6 +1086,10 @@ function App() {
             trialEnd={trialEnd}
             userStatus={userStatus}
           />
+        )}
+
+        {isDeveloper && view === "developer" && (
+          <DeveloperView copy={copy} threadsUserId={threadsUserId} />
         )}
       </main>
 
@@ -1770,6 +1799,31 @@ function LegalDocumentDialog({
           <button className="button primary" onClick={onClose}>
             {copy.settings.close}
           </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DeveloperView({
+  copy,
+  threadsUserId
+}: {
+  copy: typeof uiText.ja;
+  threadsUserId: string;
+}) {
+  return (
+    <div className="settings-layout">
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">{copy.developer.eyebrow}</p>
+            <h2>{copy.developer.title}</h2>
+          </div>
+        </div>
+        <div className="settings-list">
+          <SettingRow icon={ShieldCheck} label={copy.developer.threadsId} value={threadsUserId || "-"} />
+          <SettingRow icon={AlertTriangle} label={copy.developer.adminReview} value={copy.developer.adminReviewBody} />
         </div>
       </section>
     </div>

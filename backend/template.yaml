@@ -118,6 +118,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref PostAnalyticsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref TrialEligibilityTable
         - DynamoDBCrudPolicy:
             TableName: !Ref StripeEventsTable

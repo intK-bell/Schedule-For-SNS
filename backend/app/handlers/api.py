@@ -45,6 +45,7 @@ SUPPORTED_TIMEZONES = {
 }
 ENTITLED_SUBSCRIPTION_STATUSES = {"trialing", "active"}
 TRIAL_SECONDS = 60 * 60 * 24 * 14
+DEVELOPER_THREADS_USER_ID = "26271207252581685"
 
 def safe_return_to(value: str | None) -> str:
     normalized = value.rstrip("/") if value else None
@@ -703,6 +704,7 @@ def handler(event, context):
             {
                 "app_user_id": user["app_user_id"],
                 "threads_user_id": session["threads_user_id"],
+                "is_developer": session["threads_user_id"] == DEVELOPER_THREADS_USER_ID,
                 "locale": user.get("locale", "ja"),
                 "timezone": user.get("timezone", "Asia/Tokyo"),
                 "user_status": user.get("user_status", "active"),
@@ -787,41 +789,63 @@ def handler(event, context):
 
         subscription_res = subscriptions_table.get_item(Key={"app_user_id": app_user_id})
         subscription = subscription_res.get("Item")
+        stripe_cancel_requires_admin_review = False
+        stripe_cancel_error = None
         if subscription and subscription.get("stripe_subscription_id"):
             try:
                 stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
                 stripe.Subscription.delete(subscription["stripe_subscription_id"])
             except Exception as e:
+                stripe_cancel_requires_admin_review = True
+                stripe_cancel_error = str(e)[:1000]
                 print("STRIPE SUBSCRIPTION CANCEL ERROR", {
                     "app_user_id": app_user_id,
+                    "stripe_subscription_id": subscription["stripe_subscription_id"],
                     "error": str(e),
                 })
 
-        subscriptions_table.put_item(
-            Item={
-                **(subscription or {"app_user_id": app_user_id}),
-                "app_user_id": app_user_id,
-                "status": "canceled",
-                "updated_at": now,
-            }
-        )
+        subscription_item = {
+            **(subscription or {"app_user_id": app_user_id}),
+            "app_user_id": app_user_id,
+            "status": "cancel_pending_admin_review" if stripe_cancel_requires_admin_review else "canceled",
+            "updated_at": now,
+            "requires_admin_review": stripe_cancel_requires_admin_review,
+            "admin_review_reason": "stripe_subscription_cancel_failed" if stripe_cancel_requires_admin_review else "",
+        }
+
+        if stripe_cancel_requires_admin_review:
+            subscription_item["stripe_cancel_failed_at"] = now
+            subscription_item["stripe_cancel_error"] = stripe_cancel_error or "unknown_error"
+        else:
+            subscription_item.pop("stripe_cancel_failed_at", None)
+            subscription_item.pop("stripe_cancel_error", None)
+
+        subscriptions_table.put_item(Item=subscription_item)
 
         thread_tokens_table.delete_item(Key={"threads_user_id": threads_user_id})
         sessions_table.delete_item(Key={"session_id": session["session_id"]})
 
-        users_table.put_item(
-            Item={
-                "app_user_id": app_user_id,
-                "threads_user_id": threads_user_id,
-                "locale": user.get("locale", "ja"),
-                "timezone": user.get("timezone", "Asia/Tokyo"),
-                "subscription_status": "canceled",
-                "user_status": "deleted",
-                "created_at": int(user.get("created_at", now)),
-                "updated_at": now,
-                "deleted_at": now,
-            }
-        )
+        user_item = {
+            "app_user_id": app_user_id,
+            "threads_user_id": threads_user_id,
+            "locale": user.get("locale", "ja"),
+            "timezone": user.get("timezone", "Asia/Tokyo"),
+            "subscription_status": "canceled",
+            "user_status": "deleted",
+            "created_at": int(user.get("created_at", now)),
+            "updated_at": now,
+            "deleted_at": now,
+        }
+
+        if stripe_cancel_requires_admin_review:
+            user_item.update({
+                "requires_admin_review": True,
+                "admin_review_reason": "stripe_subscription_cancel_failed",
+                "stripe_cancel_failed_at": now,
+                "stripe_cancel_error": stripe_cancel_error or "unknown_error",
+            })
+
+        users_table.put_item(Item=user_item)
 
         trial_eligibility_table.update_item(
             Key={"trial_key_hash": trial_key_hash(threads_user_id)},
