@@ -41,6 +41,7 @@ SUPPORTED_TIMEZONES = {
     "Asia/Ho_Chi_Minh",
 }
 ENTITLED_SUBSCRIPTION_STATUSES = {"trialing", "active"}
+TRIAL_SECONDS = 60 * 60 * 24 * 14
 
 def safe_return_to(value: str | None) -> str:
     if value in ALLOWED_RETURN_TO:
@@ -100,6 +101,16 @@ def get_user(app_user_id: str) -> dict:
     user = user_res.get("Item")
     return user or default_user(app_user_id)
 
+def get_trial_eligibility(threads_user_id: str) -> dict | None:
+    trial_res = trial_eligibility_table.get_item(
+        Key={"trial_key_hash": trial_key_hash(threads_user_id)}
+    )
+    return trial_res.get("Item")
+
+def trial_already_used(threads_user_id: str) -> bool:
+    trial = get_trial_eligibility(threads_user_id)
+    return bool(trial and trial.get("trial_used"))
+
 def get_token(threads_user_id: str) -> dict | None:
     token_res = thread_tokens_table.get_item(Key={"threads_user_id": threads_user_id})
     return token_res.get("Item")
@@ -131,14 +142,26 @@ def has_subscription_entitlement(user: dict) -> bool:
     if status != "trialing":
         return False
 
-    trial_end = int(user.get("trial_end") or 0)
-    return trial_end > int(time.time())
+    return trial_end_for_user(user) > int(time.time())
 
 def effective_subscription_status(user: dict) -> str:
     status = user.get("subscription_status", "trialing")
     if status == "trialing" and not has_subscription_entitlement(user):
         return "trial_expired"
     return status
+
+def trial_started_at_for_user(user: dict) -> int:
+    if user.get("trial_started_at"):
+        return int(user["trial_started_at"])
+
+    trial = get_trial_eligibility(user.get("threads_user_id", user["app_user_id"]))
+    if trial and trial.get("first_trial_started_at"):
+        return int(trial["first_trial_started_at"])
+
+    return int(user.get("created_at") or int(time.time()))
+
+def trial_end_for_user(user: dict) -> int:
+    return int(user.get("trial_end") or trial_started_at_for_user(user) + TRIAL_SECONDS)
 
 def get_user_context(event) -> tuple[dict | None, dict | None, dict | None]:
     session = get_authenticated_session(event)
@@ -492,13 +515,15 @@ def handler(event, context):
                 now = int(time.time())
 
                 existing_user = get_user(app_user_id)
-                trial_end = existing_user.get("trial_end") or now + 60 * 60 * 24 * 14
+                trial_started_at = trial_started_at_for_user(existing_user)
+                trial_end = trial_end_for_user(existing_user)
                 write_user(app_user_id, {
                     "threads_user_id": user_id,
                     "display_name": username,
                     "locale": existing_user.get("locale", "ja"),
                     "timezone": existing_user.get("timezone", "Asia/Tokyo"),
                     "subscription_status": existing_user.get("subscription_status", "trialing"),
+                    "trial_started_at": trial_started_at,
                     "trial_end": int(trial_end),
                     "user_status": "active",
                 })
@@ -537,6 +562,7 @@ def handler(event, context):
                             "threads_user_id": user_id,
                             "trial_used": True,
                             "first_trial_started_at": now,
+                            "trial_end": now + TRIAL_SECONDS,
                             "retained_until": now + 60 * 60 * 24 * 365 * 3,
                         },
                         ConditionExpression="attribute_not_exists(trial_key_hash)",
@@ -607,7 +633,8 @@ def handler(event, context):
                 "timezone": user.get("timezone", "Asia/Tokyo"),
                 "user_status": user.get("user_status", "active"),
                 "subscription_status": effective_subscription_status(user),
-                "trial_end": int(user.get("trial_end") or 0),
+                "trial_started_at": trial_started_at_for_user(user),
+                "trial_end": trial_end_for_user(user),
                 "has_subscription_entitlement": has_subscription_entitlement(user),
                 "reauth_required": reauth_required,
                 "token_expires_at": read_expires_at(token),
@@ -786,6 +813,17 @@ def handler(event, context):
             return error_response
 
         stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+        include_trial = not trial_already_used(session["threads_user_id"])
+
+        subscription_data = {
+            "metadata": {
+                "app_user_id": user["app_user_id"],
+                "threads_user_id": session["threads_user_id"],
+            },
+        }
+
+        if include_trial:
+            subscription_data["trial_period_days"] = 14
 
         checkout_session = stripe.checkout.Session.create(
             mode="subscription",
@@ -800,18 +838,15 @@ def handler(event, context):
                     "quantity": 1,
                 }
             ],
-            subscription_data={
-                "trial_period_days": 14,
-                "metadata": {
-                    "app_user_id": user["app_user_id"],
-                    "threads_user_id": session["threads_user_id"],
-                },
-            },
+            subscription_data=subscription_data,
             success_url=app_url("/billing/success"),
             cancel_url=app_url("/billing/cancel"),
         )
 
-        return response(HTTPStatus.OK, {"checkout_url": checkout_session.url})
+        return response(HTTPStatus.OK, {
+            "checkout_url": checkout_session.url,
+            "trial_included": include_trial,
+        })
 
     if method == "POST" and path == "/billing/portal":
         # TODO: Create Stripe Billing Portal session for payment method management.

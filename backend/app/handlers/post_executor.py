@@ -13,6 +13,7 @@ dynamodb = boto3.resource("dynamodb")
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
 thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 users_table = dynamodb.Table(os.environ["USERS_TABLE"])
+TRIAL_SECONDS = 60 * 60 * 24 * 14
 
 
 def now_ts() -> int:
@@ -163,7 +164,9 @@ def has_subscription_entitlement(user: dict) -> bool:
         return True
     if status != "trialing":
         return False
-    return int(user.get("trial_end") or 0) > now_ts()
+    trial_started_at = int(user.get("trial_started_at") or user.get("created_at") or now_ts())
+    trial_end = int(user.get("trial_end") or trial_started_at + TRIAL_SECONDS)
+    return trial_end > now_ts()
 
 
 def validate_user_can_post(post: dict):

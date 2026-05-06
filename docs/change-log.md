@@ -626,3 +626,58 @@ SAMテンプレートのYAML構文確認成功
 ### 未解決・次回対応
 
 Stripe Webhookでcheckout.session.completed、customer.subscription.*を受け取り、subscription_status、trial_end、current_period_endを同期する実装が必要
+
+## 2026-05-06 JST（続き3）
+
+### 修正
+
+既存ユーザーにtrial_endが未保存の場合、無料トライアル終了扱いになる問題を修正
+
+trial_end未保存時はtrial_started_at、なければcreated_atから14日後を無料トライアル終了日時として補完するように変更
+
+trial開始日の補完優先順位を、users.trial_started_at、trial_eligibility.first_trial_started_at、users.created_at、現在時刻の順に変更
+
+ログイン時に既存ユーザーのtrial_started_atとtrial_endを保持し、再ログインでトライアル期間がリセットされないように整理
+
+### 追加
+
+/me レスポンスに trial_started_at を追加
+
+フロントエンドで無料トライアルの開始日時と終了日時を表示
+
+期限切れバナーにも無料トライアルの開始日時と終了日時を表示
+
+要件定義に無料トライアル開始日時・終了日時の表示と、既存ユーザー向けのtrial_end補完方針を追加
+
+要件定義に無料トライアル開始日時の補完優先順位を追記
+
+### 検証
+
+`python3 -m compileall backend/app` 成功
+`npm run lint` 成功
+`npm run build` 成功
+
+## 2026-05-06 JST（続き4）
+
+### 変更
+
+無料トライアルを同一Threadsアカウントにつき1回だけに制限する方針を明確化
+
+`trial_eligibility.trial_used` がtrueのThreadsアカウントでは、Stripe Checkout作成時に新しい14日トライアルを付与しないように変更
+
+初回トライアル資格レコードに `trial_end` を保持し、既存ユーザー補完と退会後の再登録判定で参照できるように変更
+
+Stripe Checkout APIレスポンスに `trial_included` を追加
+
+### ドキュメント
+
+要件定義に、無料トライアルは初回Threadsログイン時または初回トライアル資格レコード作成時に開始することを追記
+
+要件定義に、退会後に同じThreadsアカウントで再登録しても再トライアルを付与しないことを追記
+
+### 検証
+
+`python3 -m compileall backend/app` 成功
+`npm run lint` 成功
+`npm run build` 成功
+`git diff --check` 成功

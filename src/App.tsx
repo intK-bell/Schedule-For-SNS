@@ -111,6 +111,7 @@ function App() {
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [locale, setLocale] = useState("ja");
   const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>("trialing");
+  const [trialStartedAt, setTrialStartedAt] = useState<number | null>(null);
   const [trialEnd, setTrialEnd] = useState<number | null>(null);
   const [hasSubscriptionEntitlement, setHasSubscriptionEntitlement] = useState(true);
   const userTimezone =
@@ -290,6 +291,7 @@ function App() {
         setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
         setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
         setSubscriptionStatus(data.subscription_status ?? "trialing");
+        setTrialStartedAt(data.trial_started_at ?? null);
         setTrialEnd(data.trial_end ?? null);
         setHasSubscriptionEntitlement(Boolean(data.has_subscription_entitlement ?? false));
         setLocale(data.locale ?? "ja");
@@ -499,7 +501,7 @@ function App() {
         <div className="trial-panel">
           <span>{subscriptionStatus === "active" ? "サブスク有効" : "無料トライアル"}</span>
           <strong>{billingLabel(subscriptionStatus, trialEnd)}</strong>
-          <small>終了後 税込390円/月</small>
+          <small>{trialPeriodLabel(trialStartedAt, trialEnd)}</small>
           <button className="button secondary" onClick={() => void startCheckout()}>
             今すぐ登録
           </button>
@@ -552,7 +554,7 @@ function App() {
             <CreditCard size={20} />
             <div>
               <strong>無料トライアルが終了しました</strong>
-              <span>予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。</span>
+              <span>{trialPeriodLabel(trialStartedAt, trialEnd)}。予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。</span>
             </div>
             <button className="button dark" onClick={() => void startCheckout()}>
               今すぐ登録
@@ -623,6 +625,7 @@ function App() {
             setSettingsTimezone={setSettingsTimezone}
             settingsTimezone={settingsTimezone}
             subscriptionStatus={subscriptionStatus}
+            trialStartedAt={trialStartedAt}
             trialEnd={trialEnd}
             userStatus={userStatus}
           />
@@ -663,6 +666,21 @@ function billingLabel(status: SubscriptionStatus, trialEnd: number | null) {
   const days = Math.floor(remainingSeconds / 86400);
   const hours = Math.floor((remainingSeconds % 86400) / 3600);
   return `残り${days}日 ${hours}時間`;
+}
+
+function formatUnixDate(timestamp: number | null) {
+  if (!timestamp) return "未設定";
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(timestamp * 1000));
+}
+
+function trialPeriodLabel(startedAt: number | null, trialEnd: number | null) {
+  return `開始 ${formatUnixDate(startedAt)} / 終了 ${formatUnixDate(trialEnd)}`;
 }
 
 function NavButton({
@@ -1086,6 +1104,7 @@ function SettingsView({
   setSettingsTimezone,
   settingsTimezone,
   subscriptionStatus,
+  trialStartedAt,
   trialEnd,
   userStatus
 }: {
@@ -1100,6 +1119,7 @@ function SettingsView({
   setSettingsTimezone: (timezone: string) => void;
   settingsTimezone: string;
   subscriptionStatus: SubscriptionStatus;
+  trialStartedAt: number | null;
   trialEnd: number | null;
   userStatus: UserStatus;
 }) {
@@ -1152,6 +1172,7 @@ function SettingsView({
           <SettingRow icon={RefreshCcw} label="Threads連携" value={needsReconnect ? "再連携が必要" : "有効"} />
           <SettingRow icon={PauseCircle} label="利用状態" value={userStatus === "paused" ? "休止中" : "有効"} />
           <SettingRow icon={CreditCard} label="課金状態" value={billingLabel(subscriptionStatus, trialEnd)} />
+          <SettingRow icon={Clock3} label="トライアル期間" value={trialPeriodLabel(trialStartedAt, trialEnd)} />
         </div>
         <div className="button-row">
           <button className="button primary" onClick={() => void onStartCheckout()}>
