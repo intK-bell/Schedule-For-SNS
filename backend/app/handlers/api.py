@@ -294,6 +294,53 @@ def scan_all(table, **kwargs) -> list[dict]:
             return items
         kwargs["ExclusiveStartKey"] = last_key
 
+def metric_int(item: dict, *keys: str) -> int:
+    for key in keys:
+        if key in item and item.get(key) is not None:
+            return int(item.get(key) or 0)
+    return 0
+
+def normalize_analytics(item: dict | None) -> dict | None:
+    if not item:
+        return None
+
+    metrics = {
+        "views": metric_int(item, "view_count", "views"),
+        "likes": metric_int(item, "like_count", "likes"),
+        "replies": metric_int(item, "reply_count", "replies"),
+        "reposts": metric_int(item, "repost_count", "reposts"),
+        "quotes": metric_int(item, "quote_count", "quotes"),
+        "shares": metric_int(item, "share_count", "shares"),
+    }
+    engagement = metric_int(item, "engagement_total")
+    if not engagement:
+        engagement = metrics["likes"] + metrics["replies"] + metrics["reposts"] + metrics["quotes"] + metrics["shares"]
+
+    return {
+        "metrics": metrics,
+        "engagement": engagement,
+        "analytics_stage": item.get("analytics_stage", ""),
+        "analytics_fetched_at": int(item.get("fetched_at", 0) or 0),
+    }
+
+def latest_analytics_by_post(app_user_id: str) -> dict[str, dict]:
+    analytics_items = scan_all(
+        post_analytics_table,
+        FilterExpression=Attr("app_user_id").eq(app_user_id),
+    )
+    latest = {}
+    for item in analytics_items:
+        post_id = item.get("post_id")
+        if not post_id:
+            continue
+
+        fetched_at = int(item.get("fetched_at", 0) or 0)
+        current = latest.get(post_id)
+        if not current or fetched_at >= int(current.get("fetched_at", 0) or 0):
+            latest[post_id] = item
+
+    return latest
+
 def write_user(app_user_id: str, updates: dict) -> dict:
     now = int(time.time())
     current = get_user(app_user_id)
@@ -1476,9 +1523,11 @@ def handler(event, context):
                 reverse=True,
             )
 
+            analytics_by_post = latest_analytics_by_post(user["app_user_id"])
             normalized_items = []
             for item in items:
-                normalized_items.append({
+                latest_analytics = normalize_analytics(analytics_by_post.get(item["post_id"]))
+                normalized = {
                     "post_id": item["post_id"],
                     "app_user_id": item.get("app_user_id", item["threads_user_id"]),
                     "threads_user_id": item["threads_user_id"],
@@ -1490,7 +1539,10 @@ def handler(event, context):
                     "failure_reason": item.get("failure_reason", ""),
                     "created_at": int(item.get("created_at", 0)),
                     "updated_at": int(item.get("updated_at", 0)),
-                })
+                }
+                if latest_analytics:
+                    normalized.update(latest_analytics)
+                normalized_items.append(normalized)
 
             return response(HTTPStatus.OK, {
                 "items": normalized_items,
@@ -1503,7 +1555,61 @@ def handler(event, context):
                 "detail": str(e),
             })
 
-    if path.startswith("/analytics"):
-        return response(HTTPStatus.OK, {"summary": {}, "items": []})
+    if method == "GET" and path == "/analytics":
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
+        posts = scan_all(
+            scheduled_posts_table,
+            FilterExpression=Attr("threads_user_id").eq(session["threads_user_id"]),
+        )
+        analytics_by_post = latest_analytics_by_post(user["app_user_id"])
+
+        summary = {
+            "views": 0,
+            "likes": 0,
+            "replies": 0,
+            "reposts": 0,
+            "quotes": 0,
+            "shares": 0,
+            "engagement": 0,
+            "posted_posts": len([post for post in posts if post.get("status") == "posted"]),
+            "analyzed_posts": 0,
+        }
+        items = []
+
+        for post in posts:
+            if post.get("status") != "posted":
+                continue
+
+            normalized_analytics = normalize_analytics(analytics_by_post.get(post["post_id"]))
+            if not normalized_analytics:
+                continue
+
+            metrics = normalized_analytics["metrics"]
+            summary["views"] += metrics["views"]
+            summary["likes"] += metrics["likes"]
+            summary["replies"] += metrics["replies"]
+            summary["reposts"] += metrics["reposts"]
+            summary["quotes"] += metrics["quotes"]
+            summary["shares"] += metrics["shares"]
+            summary["engagement"] += normalized_analytics["engagement"]
+            summary["analyzed_posts"] += 1
+
+            items.append({
+                "post_id": post["post_id"],
+                "content": post.get("content", ""),
+                "scheduled_at": post.get("scheduled_at", ""),
+                "posted_at": int(post.get("posted_at", 0) or 0),
+                **normalized_analytics,
+            })
+
+        items.sort(key=lambda item: item.get("engagement", 0), reverse=True)
+
+        return response(HTTPStatus.OK, {
+            "summary": summary,
+            "items": items,
+        })
 
     return response(HTTPStatus.NOT_FOUND, {"message": "Not found"})

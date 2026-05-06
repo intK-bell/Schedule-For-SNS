@@ -37,6 +37,8 @@ type ScheduledPost = {
   timezone: string;
   status: PostStatus;
   failureReason?: string;
+  analyticsStage?: string;
+  analyticsFetchedAt?: number;
   metrics?: {
     views: number;
     likes: number;
@@ -54,6 +56,9 @@ type ApiScheduledPost = {
   timezone?: string;
   status?: string;
   failure_reason?: string;
+  analytics_stage?: string;
+  analytics_fetched_at?: number;
+  metrics?: ScheduledPost["metrics"];
 };
 
 type DeveloperDashboard = {
@@ -188,6 +193,9 @@ const uiText: Record<LocaleCode, any> = {
       eyebrow: "Ranking",
       title: "反応が良かった投稿",
       cumulative: "累計値",
+      noData: "分析データはまだありません。投稿後の分析取得が完了すると表示されます。",
+      analyzedPosts: "分析済み投稿",
+      latestStage: "最新取得",
     },
     settings: {
       eyebrow: "Account",
@@ -350,6 +358,9 @@ const uiText: Record<LocaleCode, any> = {
       eyebrow: "Ranking",
       title: "Top performing posts",
       cumulative: "Cumulative",
+      noData: "No analytics data yet. Results appear after analytics collection completes for posted content.",
+      analyzedPosts: "Analyzed posts",
+      latestStage: "Latest stage",
     },
     settings: {
       eyebrow: "Account",
@@ -550,6 +561,9 @@ function toScheduledPost(item: ApiScheduledPost): ScheduledPost {
     timezone: item.timezone ?? "Asia/Tokyo",
     status: validStatuses.includes(item.status as PostStatus) ? item.status as PostStatus : "scheduled",
     failureReason: item.failure_reason ?? "",
+    analyticsStage: item.analytics_stage ?? "",
+    analyticsFetchedAt: item.analytics_fetched_at ?? 0,
+    metrics: item.metrics,
   };
 }
 
@@ -1080,11 +1094,6 @@ function App() {
             </button>
           </div>
         </header>
-
-        <section className="notice-band">
-          <ShieldCheck size={18} />
-          <span>{copy.notice}</span>
-        </section>
 
         {!hasEffectiveSubscriptionEntitlement && (
           <section className="dialog-banner danger">
@@ -1648,6 +1657,7 @@ function AnalyticsView({
   engagement: number;
   postedPosts: ScheduledPost[];
 }) {
+  const analyzedPosts = postedPosts.filter((post) => post.metrics);
   const statItems = [
     { label: copy.analytics.views, value: analytics.views },
     { label: copy.analytics.likes, value: analytics.likes },
@@ -1660,6 +1670,10 @@ function AnalyticsView({
   return (
     <div className="analytics-layout">
       <section className="metric-strip">
+        <div className="metric">
+          <span>{copy.analytics.analyzedPosts}</span>
+          <strong>{analyzedPosts.length.toLocaleString()}</strong>
+        </div>
         {statItems.map((item) => (
           <div className="metric" key={item.label}>
             <span>{item.label}</span>
@@ -1679,8 +1693,11 @@ function AnalyticsView({
           </div>
           <span className="pill muted">{copy.analytics.cumulative}</span>
         </div>
-        <div className="post-list">
-          {postedPosts.map((post) => (
+        {analyzedPosts.length === 0 ? (
+          <p className="muted-text">{copy.analytics.noData}</p>
+        ) : (
+          <div className="post-list">
+            {analyzedPosts.map((post) => (
             <article className="post-row" key={post.id}>
               <div className="status-dot success">
                 <BarChart3 size={17} />
@@ -1688,14 +1705,16 @@ function AnalyticsView({
               <div className="post-main">
                 <div className="post-meta">
                   <span>{post.date}</span>
-                  <span>1h / 24h / 72h</span>
+                  <span>{copy.analytics.latestStage}: {post.analyticsStage || "-"}</span>
+                  {post.analyticsFetchedAt ? <span>{formatUnixDate(post.analyticsFetchedAt, copy)}</span> : null}
                 </div>
                 <p>{post.content}</p>
               </div>
               <strong>{post.metrics ? post.metrics.likes + post.metrics.replies + post.metrics.reposts + post.metrics.quotes + post.metrics.shares : 0}</strong>
             </article>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

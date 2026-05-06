@@ -1,9 +1,11 @@
 import os
 import json
 import time
+import hashlib
 import urllib.parse
 import urllib.request
 import boto3
+from datetime import datetime, timezone, timedelta
 from urllib.error import HTTPError
 
 from handlers.token_store import read_access_token, read_expires_at
@@ -13,7 +15,13 @@ dynamodb = boto3.resource("dynamodb")
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
 thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 users_table = dynamodb.Table(os.environ["USERS_TABLE"])
+scheduler = boto3.client("scheduler")
 TRIAL_SECONDS = 60 * 60 * 24 * 14
+ANALYTICS_STAGES = {
+    "1h": 60 * 60,
+    "24h": 60 * 60 * 24,
+    "72h": 60 * 60 * 72,
+}
 
 
 def now_ts() -> int:
@@ -180,6 +188,38 @@ def validate_user_can_post(post: dict):
     if not has_subscription_entitlement(user):
         raise Exception("Subscription inactive")
 
+def scheduler_time_after(seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S")
+
+def analytics_schedule_name(post_id: str, stage: str) -> str:
+    digest = hashlib.sha256(f"{post_id}:{stage}".encode("utf-8")).hexdigest()[:24]
+    return f"s4s-analytics-{stage}-{digest}"
+
+def create_analytics_schedules(post_id: str):
+    target_arn = os.environ.get("ANALYTICS_SYNC_FUNCTION_ARN")
+    role_arn = os.environ.get("SCHEDULER_INVOKE_ROLE_ARN")
+    if not target_arn or not role_arn:
+        print("ANALYTICS SCHEDULE SKIPPED", {
+            "post_id": post_id,
+            "has_target_arn": bool(target_arn),
+            "has_role_arn": bool(role_arn),
+        })
+        return
+
+    for stage, delay_seconds in ANALYTICS_STAGES.items():
+        scheduler.create_schedule(
+            Name=analytics_schedule_name(post_id, stage),
+            GroupName=os.environ.get("SCHEDULER_GROUP_NAME", "default"),
+            ScheduleExpression=f"at({scheduler_time_after(delay_seconds)})",
+            FlexibleTimeWindow={"Mode": "OFF"},
+            ActionAfterCompletion="DELETE",
+            Target={
+                "Arn": target_arn,
+                "RoleArn": role_arn,
+                "Input": json.dumps({"post_id": post_id, "analytics_stage": stage}),
+            },
+        )
+
 def handler(event, context):
     print("POST EXECUTOR START", {
         "has_post_id": bool(event.get("post_id")),
@@ -257,6 +297,14 @@ def handler(event, context):
                 ":updated_at": now_ts(),
             },
         )
+
+        try:
+            create_analytics_schedules(post_id)
+        except Exception as schedule_error:
+            print("ANALYTICS SCHEDULE CREATE ERROR", {
+                "post_id": post_id,
+                "error": str(schedule_error),
+            })
 
         return {
             "ok": True,

@@ -828,12 +828,15 @@ label.wide {
 
   .app-shell {
     grid-template-columns: 1fr;
+    min-width: 0;
   }
 
   .sidebar {
     position: sticky;
     top: 0;
     z-index: 10;
+    width: 100%;
+    min-width: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -890,8 +893,10 @@ label.wide {
 
   .nav-stack.open {
     grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
     gap: 6px;
   }
 
@@ -922,7 +927,7 @@ label.wide {
 
   .main-surface,
   .sidebar {
-    padding: 16px;
+    padding: 12px;
   }
 
   .topbar,
@@ -975,6 +980,10 @@ label.wide {
 
   .nav-button span {
     font-size: 0.82rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .post-meta {
