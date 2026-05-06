@@ -46,6 +46,32 @@ def get_cookie(event, name: str) -> str | None:
 
     return None
 
+def summarize_http_error(error: HTTPError, stage: str) -> tuple[dict, str]:
+    raw_body = error.read().decode("utf-8", errors="replace")
+    error_code = None
+    error_type = None
+
+    try:
+        parsed = json.loads(raw_body)
+        error_payload = parsed.get("error", parsed)
+        error_code = error_payload.get("code")
+        error_type = error_payload.get("type")
+    except Exception:
+        pass
+
+    summary = {
+        "stage": stage,
+        "status_code": error.code,
+        "error_code": error_code,
+        "error_type": error_type,
+    }
+
+    detail = f"{stage} failed status_code={error.code}"
+    if error_code is not None:
+        detail = f"{detail} error_code={error_code}"
+
+    return summary, detail
+
 def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
     # 1. 投稿コンテナ作成
     create_url = f"https://graph.threads.net/v1.0/{user_id}/threads"
@@ -67,13 +93,9 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         with urllib.request.urlopen(create_req) as res:
             create_body = json.loads(res.read())
     except HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        print({
-            "stage": "threads_create_error",
-            "status_code": e.code,
-            "error_body": error_body,
-        })
-        raise
+        summary, detail = summarize_http_error(e, "threads_create_error")
+        print(summary)
+        raise Exception(detail)
 
     creation_id = create_body.get("id")
 
@@ -99,13 +121,9 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         with urllib.request.urlopen(publish_req) as res:
             publish_body = json.loads(res.read())
     except HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        print({
-            "stage": "threads_publish_error",
-            "status_code": e.code,
-            "error_body": error_body,
-        })
-        raise
+        summary, detail = summarize_http_error(e, "threads_publish_error")
+        print(summary)
+        raise Exception(detail)
 
     return publish_body
 
@@ -320,7 +338,7 @@ def handler(event, context):
 
                 print("LOGIN SUCCESS", {
                     "user_id": user_id,
-                    "session_id": session_id,
+                    "has_session_id": bool(session_id),
                 })
 
                 return_to = safe_return_to(query.get("state"))
@@ -332,16 +350,24 @@ def handler(event, context):
                     ],
                 )
 
-        except Exception as e:
-            error_body = ""
-            if hasattr(e, "read"):
-                error_body = e.read().decode("utf-8")
-
-            print("TOKEN ERROR", str(e), error_body)
+        except HTTPError as e:
+            summary, detail = summarize_http_error(e, "threads_oauth_callback_error")
+            print("TOKEN ERROR", summary)
 
             return response(500, {
                 "message": "Token exchange failed",
-                "detail": error_body,
+                "detail": detail,
+            })
+
+        except Exception as e:
+            print("TOKEN ERROR", {
+                "stage": "threads_oauth_callback_error",
+                "error_type": type(e).__name__,
+            })
+
+            return response(500, {
+                "message": "Token exchange failed",
+                "detail": "threads_oauth_callback_error failed",
             })
         
     if method == "POST" and path == "/auth/logout":
@@ -435,15 +461,14 @@ def handler(event, context):
             })
 
         except Exception as e:
-            error_body = ""
-            if hasattr(e, "read"):
-                error_body = e.read().decode("utf-8")
-
-            print("THREADS POST ERROR", str(e), error_body)
+            print("THREADS POST ERROR", {
+                "stage": "threads_test_post_error",
+                "error": str(e),
+            })
 
             return response(HTTPStatus.INTERNAL_SERVER_ERROR, {
                 "message": "Threads post failed",
-                "detail": error_body or str(e),
+                "detail": str(e),
             })
 
     if method == "POST" and path == "/billing/checkout":

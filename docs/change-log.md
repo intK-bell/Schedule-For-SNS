@@ -315,8 +315,8 @@ thread_tokensテーブルへの分離およびKMS暗号化対応
 
 自動投稿の実行確認およびトラブルシュート機構を実装
 
-PostExecutorFunctionにおいてThreads APIエラー内容の詳細ログ出力を追加
-HTTPErrorのレスポンス本文をCloudWatch Logsへ出力することで原因特定を可能に
+PostExecutorFunctionにおいてThreads APIエラー内容の確認ログを追加
+詳細な外部APIエラー本文の扱いは、2026-05-06にログ方針へ合わせて修正
 
 Threadsアクセストークンを短期トークンから長期トークン（約60日）へ交換する処理を実装
 ログイン時にaccess_token_expires_atを計算しDynamoDBへ保存
@@ -463,7 +463,7 @@ thread_tokensテーブルのKMS暗号化対応
 以下の条件に該当する日付を非活性化
 
 今日より前の日付
-30日以降の日付（予約可能期間外）
+30日を超える日付（予約可能期間外）
 予約上限（3件）に達している日付
 
 非活性日付に対して以下のUX改善を実装
@@ -502,3 +502,41 @@ max：30日後
 
 ### 未解決・次回対応
 
+予約可能期間30日制限を要件定義へ反映する（2026-05-06対応済み）
+外部APIエラー本文をログへ出さない方針との整合性を確認する（2026-05-06対応済み）
+
+## 2026-05-06 JST
+
+### 修正
+
+要件定義に予約可能期間30日以内の制限を追加
+
+休止状態をMVP対象として扱うように課金要件の文言を整理
+
+設定、休止、再開、退会、Threads再連携のAPI要件を追加
+
+scheduled_posts.failure_detail の扱いを要件へ追加
+failure_detailには外部APIレスポンス全文、投稿本文、アクセストークン、Cookie、Authorizationヘッダーを保存しない方針を明記
+
+Threads APIおよびトークン更新のHTTPError処理を修正
+CloudWatch Logsへ外部APIレスポンス本文を直接出力せず、ステータスコード、エラーコード、エラー種別だけを記録するように変更
+
+OAuthログイン成功ログでsession_idそのものを出力せず、session_idの有無だけを出力するように変更
+
+予約可能期間の変更記録にあった「30日以降」の表現を「30日を超える日付」に修正
+
+フロントエンドのlintエラーを修正
+未使用のテスト投稿UI残骸とサンプル投稿データを削除し、予約一覧取得処理の関数宣言順と型定義を整理
+
+### 検証
+
+`python3 -m compileall backend/app` 成功
+`npm run lint` 成功
+`npm run build` 成功
+
+### 未解決・次回対応
+
+thread_tokensテーブルのKMS暗号化対応
+thread_tokensの項目名を要件上の access_token_encrypted / expires_at へ寄せるか、実装名を要件へ反映するかを最終決定する
+設定、休止、再開、退会APIの実装
+Threads再連携導線の本実装

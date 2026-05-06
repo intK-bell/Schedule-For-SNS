@@ -16,6 +16,33 @@ def now_ts() -> int:
     return int(time.time())
 
 
+def summarize_http_error(error: HTTPError, stage: str) -> tuple[dict, str]:
+    raw_body = error.read().decode("utf-8", errors="replace")
+    error_code = None
+    error_type = None
+
+    try:
+        parsed = json.loads(raw_body)
+        error_payload = parsed.get("error", parsed)
+        error_code = error_payload.get("code")
+        error_type = error_payload.get("type")
+    except Exception:
+        pass
+
+    summary = {
+        "stage": stage,
+        "status_code": error.code,
+        "error_code": error_code,
+        "error_type": error_type,
+    }
+
+    detail = f"{stage} failed status_code={error.code}"
+    if error_code is not None:
+        detail = f"{detail} error_code={error_code}"
+
+    return summary, detail
+
+
 def refresh_threads_token(access_token: str) -> dict:
     client_secret = os.environ["THREADS_CLIENT_SECRET"]
 
@@ -36,13 +63,9 @@ def refresh_threads_token(access_token: str) -> dict:
         with urllib.request.urlopen(req) as res:
             return json.loads(res.read())
     except HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        print({
-            "stage": "threads_token_refresh_error",
-            "status_code": e.code,
-            "error_body": error_body,
-        })
-        raise Exception(f"Threads token refresh failed: {error_body}")
+        summary, detail = summarize_http_error(e, "threads_token_refresh_error")
+        print(summary)
+        raise Exception(detail)
 
 
 def handler(event, context):

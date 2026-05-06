@@ -15,13 +15,39 @@ thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 def now_ts() -> int:
     return int(time.time())
 
+def summarize_http_error(error: HTTPError, stage: str) -> tuple[dict, str]:
+    raw_body = error.read().decode("utf-8", errors="replace")
+    error_code = None
+    error_type = None
+
+    try:
+        parsed = json.loads(raw_body)
+        error_payload = parsed.get("error", parsed)
+        error_code = error_payload.get("code")
+        error_type = error_payload.get("type")
+    except Exception:
+        pass
+
+    summary = {
+        "stage": stage,
+        "status_code": error.code,
+        "error_code": error_code,
+        "error_type": error_type,
+    }
+
+    detail = f"{stage} failed status_code={error.code}"
+    if error_code is not None:
+        detail = f"{detail} error_code={error_code}"
+
+    return summary, detail
+
 def to_user_failure_reason(error_text: str) -> str:
     if not error_text:
         return "投稿に失敗しました。再度予約してください。"
 
     lowered = error_text.lower()
 
-    if "error validating access token" in lowered or '"code":190' in lowered:
+    if "error validating access token" in lowered or "error_code=190" in lowered:
         return "Threadsとの連携期限が切れています。再ログインしてください。"
 
     if "invalid oauth access token" in lowered:
@@ -30,7 +56,7 @@ def to_user_failure_reason(error_text: str) -> str:
     if "missing required parameter" in lowered or "invalid parameter" in lowered:
         return "投稿内容に問題がある可能性があります。本文を確認してください。"
 
-    if "rate limit" in lowered or '"code":4' in lowered or '"code":17' in lowered:
+    if "rate limit" in lowered or "error_code=4" in lowered or "error_code=17" in lowered:
         return "Threads側の制限により投稿できませんでした。時間をおいて再度予約してください。"
 
     if "http error 400" in lowered:
@@ -58,13 +84,9 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         with urllib.request.urlopen(create_req) as res:
             create_body = json.loads(res.read())
     except HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        print({
-            "stage": "threads_create_error",
-            "status_code": e.code,
-            "error_body": error_body,
-        })
-        raise Exception(f"Threads create failed: {error_body}")
+        summary, detail = summarize_http_error(e, "threads_create_error")
+        print(summary)
+        raise Exception(detail)
 
     creation_id = create_body.get("id")
 
@@ -89,13 +111,9 @@ def post_to_threads(user_id: str, access_token: str, text: str) -> dict:
         with urllib.request.urlopen(publish_req) as res:
             return json.loads(res.read())
     except HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")
-        print({
-            "stage": "threads_publish_error",
-            "status_code": e.code,
-            "error_body": error_body,
-        })
-        raise Exception(f"Threads publish failed: {error_body}")
+        summary, detail = summarize_http_error(e, "threads_publish_error")
+        print(summary)
+        raise Exception(detail)
 
 
 def get_access_token_by_threads_user_id(threads_user_id: str) -> str:

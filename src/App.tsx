@@ -11,14 +11,13 @@ import {
   LogOut,
   Menu,
   PauseCircle,
-  Plus,
   RefreshCcw,
   Settings,
   ShieldCheck,
   Trash2,
   XCircle
 } from "lucide-react";
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type View = "calendar" | "posts" | "analytics" | "settings";
 type PostStatus = "scheduled" | "posted" | "failed" | "canceled";
@@ -43,6 +42,15 @@ type ScheduledPost = {
   };
 };
 
+type ApiScheduledPost = {
+  post_id: string;
+  content: string;
+  scheduled_at: string;
+  timezone?: string;
+  status?: string;
+  failure_reason?: string;
+};
+
 const localeLabels = [
   { code: "ja", label: "日本語" },
   { code: "en", label: "English" },
@@ -51,48 +59,31 @@ const localeLabels = [
   { code: "vi", label: "Tiếng Việt" }
 ];
 
-const initialPosts: ScheduledPost[] = [
-  {
-    id: "post-001",
-    content: "Schedule For SNSの初期画面を整えています。予約投稿をもっと軽く。",
-    date: "2026-05-02",
-    time: "09:30",
-    timezone: "Asia/Tokyo",
-    status: "scheduled"
-  },
-  {
-    id: "post-002",
-    content: "投稿から24時間の基本分析を確認。累計値だけに絞ると運用が楽です。",
-    date: "2026-05-01",
-    time: "13:00",
-    timezone: "Asia/Tokyo",
-    status: "posted",
-    metrics: {
-      views: 1280,
-      likes: 96,
-      replies: 11,
-      reposts: 7,
-      quotes: 3,
-      shares: 14
-    }
-  },
-  {
-    id: "post-003",
-    content: "再連携チェックの挙動確認用投稿です。",
-    date: "2026-05-01",
-    time: "16:00",
-    timezone: "Asia/Tokyo",
-    status: "failed",
-    failureReason: "Threads再連携が必要"
-  }
-];
-
 const statusMeta: Record<PostStatus, { label: string; icon: typeof Clock3; tone: string }> = {
   scheduled: { label: "予約済み", icon: Clock3, tone: "info" },
   posted: { label: "投稿済み", icon: CheckCircle2, tone: "success" },
   failed: { label: "失敗", icon: XCircle, tone: "danger" },
   canceled: { label: "キャンセル済み", icon: PauseCircle, tone: "muted" }
 };
+
+function toScheduledPost(item: ApiScheduledPost): ScheduledPost {
+  const scheduledAt = new Date(item.scheduled_at);
+  const validStatuses: PostStatus[] = ["scheduled", "posted", "failed", "canceled"];
+
+  return {
+    id: item.post_id,
+    content: item.content,
+    date: scheduledAt.toLocaleDateString("sv-SE"),
+    time: scheduledAt.toLocaleTimeString("sv-SE", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }),
+    timezone: item.timezone ?? "Asia/Tokyo",
+    status: validStatuses.includes(item.status as PostStatus) ? item.status as PostStatus : "scheduled",
+    failureReason: item.failure_reason ?? "",
+  };
+}
 
 function App() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
@@ -111,29 +102,6 @@ function App() {
     }).then(() => {
       window.location.reload();
     });
-  };
-
-  const handleTestPost = async () => {
-    const text = draft.content.trim();
-  
-    if (!text) {
-      alert("投稿本文を入力してください");
-      return;
-    }
-  
-    const res = await fetch(`${apiBaseUrl}/threads/test-post`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ text }),
-    });
-  
-    const data = await res.json();
-    console.log("POST RESULT", data);
-  
-    alert(res.ok ? "投稿成功！" : "投稿失敗…");
   };
 
   const [view, setView] = useState<View>("calendar");
@@ -204,6 +172,21 @@ function App() {
   
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
+  const fetchScheduledPosts = useCallback(async () => {
+    const res = await fetch(`${apiBaseUrl}/scheduled-posts`, {
+      credentials: "include",
+    });
+  
+    const data = await res.json();
+  
+    if (!res.ok) {
+      console.log("SCHEDULE LIST ERROR", data);
+      return;
+    }
+  
+    setPosts((data.items ?? []).map(toScheduledPost));
+  }, [apiBaseUrl]);
+
   useEffect(() => {
     fetch(`${apiBaseUrl}/me`, {
       credentials: "include",
@@ -227,7 +210,7 @@ function App() {
       .catch(() => {
         setIsLoggedIn(false);
       });
-  }, [apiBaseUrl]);
+  }, [apiBaseUrl, fetchScheduledPosts]);
 
   function resetDraft() {
     const nextDateTime = new Date();
@@ -246,39 +229,6 @@ function App() {
       timezone: userTimezone,
       content: ""
     });
-  }
-
-  function toScheduledPost(item: any): ScheduledPost {
-    const scheduledAt = new Date(item.scheduled_at);
-  
-    return {
-      id: item.post_id,
-      content: item.content,
-      date: scheduledAt.toLocaleDateString("sv-SE"),
-      time: scheduledAt.toLocaleTimeString("sv-SE", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }),
-      timezone: item.timezone ?? "Asia/Tokyo",
-      status: item.status ?? "scheduled",
-      failureReason: item.failure_reason ?? "",
-    };
-  }
-  
-  async function fetchScheduledPosts() {
-    const res = await fetch(`${apiBaseUrl}/scheduled-posts`, {
-      credentials: "include",
-    });
-  
-    const data = await res.json();
-  
-    if (!res.ok) {
-      console.log("SCHEDULE LIST ERROR", data);
-      return;
-    }
-  
-    setPosts((data.items ?? []).map(toScheduledPost));
   }
 
   function beginEdit(post: ScheduledPost) {
@@ -481,13 +431,6 @@ function App() {
             <LogOut size={18} />
           </button>
 
-          {/* <button
-            className="icon-button"
-            title="テスト投稿"
-            onClick={handleTestPost}
-          >
-            投稿テスト
-          </button> */}
           </div>
         </header>
 
@@ -625,7 +568,6 @@ function CalendarView({
   visibleMonth: string;
 }) {
   const dates = useMemo(() => buildMonthDates(visibleMonth), [visibleMonth]);
-  const [year, month] = visibleMonth.split("-");
   const isFull = remainingSlots === 0 && !editingId;
   const isContentEmpty = draft.content.trim().length === 0;
   const isDateTimeMissing = !draft.date || !draft.time;
