@@ -578,7 +578,6 @@ function App() {
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState(false);
-  const [threadsUserId, setThreadsUserId] = useState("");
   const [developerDashboard, setDeveloperDashboard] = useState<DeveloperDashboard | null>(null);
   const [developerLoading, setDeveloperLoading] = useState(false);
   const [developerError, setDeveloperError] = useState("");
@@ -816,7 +815,6 @@ function App() {
   
         setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
         setIsDeveloper(Boolean(data.is_developer ?? data.isDeveloper ?? false));
-        setThreadsUserId(data.threads_user_id ?? data.threadsUserId ?? "");
         setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
         setSubscriptionStatus(data.subscription_status ?? "trialing");
         setTrialStartedAt(data.trial_started_at ?? null);
@@ -1181,7 +1179,6 @@ function App() {
             error={developerError}
             isLoading={developerLoading}
             onRefresh={fetchDeveloperDashboard}
-            threadsUserId={threadsUserId}
           />
         )}
       </main>
@@ -1903,15 +1900,13 @@ function DeveloperView({
   error,
   isLoading,
   onRefresh,
-  copy,
-  threadsUserId
+  copy
 }: {
   dashboard: DeveloperDashboard | null;
   error: string;
   isLoading: boolean;
   onRefresh: () => Promise<void>;
   copy: typeof uiText.ja;
-  threadsUserId: string;
 }) {
   const metrics = dashboard?.metrics;
   const metricItems = [
@@ -1925,22 +1920,6 @@ function DeveloperView({
 
   return (
     <div className="settings-layout">
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">{copy.developer.eyebrow}</p>
-            <h2>{copy.developer.title}</h2>
-          </div>
-          <button className="button secondary compact" onClick={() => void onRefresh()}>
-            <RefreshCcw size={16} />
-            {isLoading ? copy.developer.loading : copy.reconnect.shortButton}
-          </button>
-        </div>
-        <div className="settings-list">
-          <SettingRow icon={ShieldCheck} label={copy.developer.threadsId} value={threadsUserId || "-"} />
-          <SettingRow icon={AlertTriangle} label={copy.developer.adminReview} value={copy.developer.adminReviewBody} />
-        </div>
-      </section>
       <section className="metric-strip">
         {metricItems.map((item) => (
           <div className="metric" key={item.label}>
@@ -1955,6 +1934,10 @@ function DeveloperView({
             <p className="eyebrow">{copy.developer.reviewCount}</p>
             <h2>{copy.developer.adminReview}</h2>
           </div>
+          <button className="button secondary compact" onClick={() => void onRefresh()}>
+            <RefreshCcw size={16} />
+            {isLoading ? copy.developer.loading : copy.reconnect.shortButton}
+          </button>
         </div>
         {error && <p className="muted-text">{error}</p>}
         {isLoading && !dashboard && <p className="muted-text">{copy.developer.loading}</p>}
