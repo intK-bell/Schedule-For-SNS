@@ -26,6 +26,7 @@ subscriptions_table = dynamodb.Table(os.environ["SUBSCRIPTIONS_TABLE"])
 post_analytics_table = dynamodb.Table(os.environ["POST_ANALYTICS_TABLE"])
 trial_eligibility_table = dynamodb.Table(os.environ["TRIAL_ELIGIBILITY_TABLE"])
 stripe_events_table = dynamodb.Table(os.environ["STRIPE_EVENTS_TABLE"])
+admins_table = dynamodb.Table(os.environ["ADMINS_TABLE"])
 scheduler = boto3.client("scheduler")
 
 ALLOWED_RETURN_TO = {
@@ -45,7 +46,7 @@ SUPPORTED_TIMEZONES = {
 }
 ENTITLED_SUBSCRIPTION_STATUSES = {"trialing", "active"}
 TRIAL_SECONDS = 60 * 60 * 24 * 14
-DEVELOPER_THREADS_USER_ID = "26271207252581685"
+BOOTSTRAP_ADMIN_THREADS_USER_ID = os.environ.get("BOOTSTRAP_ADMIN_THREADS_USER_ID", "")
 
 def safe_return_to(value: str | None) -> str:
     normalized = value.rstrip("/") if value else None
@@ -279,10 +280,20 @@ def developer_guard(event):
     if error_response:
         return None, None, None, error_response
 
-    if session["threads_user_id"] != DEVELOPER_THREADS_USER_ID:
+    if not is_admin_threads_user(session["threads_user_id"]):
         return None, None, None, response(HTTPStatus.FORBIDDEN, {"message": "Forbidden"})
 
     return session, user, token, None
+
+def is_admin_threads_user(threads_user_id: str) -> bool:
+    admin = admins_table.get_item(
+        Key={"admin_threads_user_id": threads_user_id}
+    ).get("Item")
+    if admin and admin.get("enabled", True) is not False:
+        return True
+
+    # Bootstrap fallback until the admins table is populated in each environment.
+    return bool(BOOTSTRAP_ADMIN_THREADS_USER_ID and threads_user_id == BOOTSTRAP_ADMIN_THREADS_USER_ID)
 
 def scan_all(table, **kwargs) -> list[dict]:
     items = []
@@ -771,7 +782,7 @@ def handler(event, context):
             {
                 "app_user_id": user["app_user_id"],
                 "threads_user_id": session["threads_user_id"],
-                "is_developer": session["threads_user_id"] == DEVELOPER_THREADS_USER_ID,
+                "is_developer": is_admin_threads_user(session["threads_user_id"]),
                 "locale": user.get("locale", "ja"),
                 "timezone": user.get("timezone", "Asia/Tokyo"),
                 "user_status": user.get("user_status", "active"),
@@ -999,6 +1010,63 @@ def handler(event, context):
                 ]),
             },
             "admin_review_items": review_items[:100],
+        })
+
+    if method == "POST" and path == "/developer/admin-review/resolve":
+        session, user, token, error_response = developer_guard(event)
+        if error_response:
+            return error_response
+
+        body = json.loads(event.get("body") or "{}")
+        app_user_id = body.get("app_user_id")
+        if not app_user_id:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "app_user_id is required"})
+
+        now = int(time.time())
+        subscription = subscriptions_table.get_item(Key={"app_user_id": app_user_id}).get("Item")
+        if not subscription:
+            return response(HTTPStatus.NOT_FOUND, {"message": "subscription not found"})
+
+        subscriptions_table.update_item(
+            Key={"app_user_id": app_user_id},
+            UpdateExpression="""
+                SET requires_admin_review = :requires_admin_review,
+                    #status = :status,
+                    admin_review_resolved_at = :resolved_at,
+                    admin_review_resolved_by = :resolved_by,
+                    updated_at = :updated_at
+            """,
+            ExpressionAttributeNames={
+                "#status": "status",
+            },
+            ExpressionAttributeValues={
+                ":requires_admin_review": False,
+                ":status": "canceled",
+                ":resolved_at": now,
+                ":resolved_by": session["threads_user_id"],
+                ":updated_at": now,
+            },
+        )
+
+        users_table.update_item(
+            Key={"app_user_id": app_user_id},
+            UpdateExpression="""
+                SET requires_admin_review = :requires_admin_review,
+                    admin_review_resolved_at = :resolved_at,
+                    admin_review_resolved_by = :resolved_by,
+                    updated_at = :updated_at
+            """,
+            ExpressionAttributeValues={
+                ":requires_admin_review": False,
+                ":resolved_at": now,
+                ":resolved_by": session["threads_user_id"],
+                ":updated_at": now,
+            },
+        )
+
+        return response(HTTPStatus.OK, {
+            "ok": True,
+            "app_user_id": app_user_id,
         })
     
     if method == "POST" and path == "/threads/test-post":

@@ -18,7 +18,7 @@ import {
   Wrench,
   XCircle
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import legalPoliciesText from "../docs/legal-policies.md?raw";
 
 type View = "calendar" | "posts" | "analytics" | "settings" | "developer";
@@ -240,6 +240,8 @@ const uiText: Record<LocaleCode, any> = {
       stripeSubscription: "Stripe subscription",
       failedAt: "失敗日時",
       error: "エラー",
+      resolve: "確認済みにする",
+      resolveFailed: "管理者確認の更新に失敗しました",
     },
     legal: {
       commerce: "特定商取引法に基づく表記",
@@ -405,6 +407,8 @@ const uiText: Record<LocaleCode, any> = {
       stripeSubscription: "Stripe subscription",
       failedAt: "Failed at",
       error: "Error",
+      resolve: "Mark resolved",
+      resolveFailed: "Failed to update admin review",
     },
     legal: {
       commerce: "Specified Commercial Transaction Act notice",
@@ -750,6 +754,25 @@ function App() {
       setDeveloperLoading(false);
     }
   }, [apiBaseUrl, copy.developer.loadFailed, isDeveloper]);
+
+  const resolveAdminReview = useCallback(async (appUserId: string) => {
+    const res = await fetch(`${apiBaseUrl}/developer/admin-review/resolve`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ app_user_id: appUserId }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.message ?? copy.developer.resolveFailed);
+      return;
+    }
+
+    await fetchDeveloperDashboard();
+  }, [apiBaseUrl, copy.developer.resolveFailed, fetchDeveloperDashboard]);
 
   const selectedPosts = posts.filter(
     (post) => post.date === selectedDate && post.status === "scheduled"
@@ -1188,6 +1211,7 @@ function App() {
             error={developerError}
             isLoading={developerLoading}
             onRefresh={fetchDeveloperDashboard}
+            onResolveReview={resolveAdminReview}
           />
         )}
       </main>
@@ -1352,6 +1376,7 @@ function CalendarView({
   visibleMonth: string;
 }) {
   const dates = useMemo(() => buildMonthDates(visibleMonth), [visibleMonth]);
+  const dateGridRef = useRef<HTMLDivElement | null>(null);
   const isFull = remainingSlots === 0 && !editingId;
   const isContentEmpty = draft.content.trim().length === 0;
   const isDateTimeMissing = !draft.date || !draft.time;
@@ -1367,6 +1392,18 @@ function CalendarView({
   })();
 
   const canSubmit = submitDisabledReason === "";
+
+  useEffect(() => {
+    const today = getTodayDate();
+    if (!today.startsWith(visibleMonth)) return;
+
+    const grid = dateGridRef.current;
+    const todayButton = grid?.querySelector<HTMLButtonElement>(`button[data-date="${today}"]`);
+    if (!grid || !todayButton) return;
+
+    grid.scrollLeft = todayButton.offsetLeft - (grid.clientWidth / 2) + (todayButton.clientWidth / 2);
+  }, [visibleMonth, dates]);
+
   return (
     <div className="workspace-grid">
       <section className="panel calendar-panel">
@@ -1392,7 +1429,7 @@ function CalendarView({
             </select>
           </label>
         </div>
-        <div className="date-grid">
+        <div className="date-grid" ref={dateGridRef}>
         {dates.map((date) => {
           const count = activePosts.filter((post) => post.date === date).length;
           const isOutOfRange = date < minDate || date > maxDate;
@@ -1405,6 +1442,7 @@ function CalendarView({
                 isDisabledDate ? "disabled" : ""
               }`}
               key={date}
+              data-date={date}
               disabled={isDisabledDate}
               onClick={() => {
                 setSelectedDate(date);
@@ -1919,12 +1957,14 @@ function DeveloperView({
   error,
   isLoading,
   onRefresh,
+  onResolveReview,
   copy
 }: {
   dashboard: DeveloperDashboard | null;
   error: string;
   isLoading: boolean;
   onRefresh: () => Promise<void>;
+  onResolveReview: (appUserId: string) => Promise<void>;
   copy: typeof uiText.ja;
 }) {
   const metrics = dashboard?.metrics;
@@ -1978,7 +2018,13 @@ function DeveloperView({
                 <p>{copy.developer.stripeSubscription}: {item.stripe_subscription_id || "-"}</p>
                 {item.stripe_cancel_error && <p>{copy.developer.error}: {item.stripe_cancel_error}</p>}
               </div>
-              <strong>{item.status}</strong>
+              <div className="row-actions">
+                <strong>{item.status}</strong>
+                <button className="button secondary compact" onClick={() => void onResolveReview(item.app_user_id)}>
+                  <CheckCircle2 size={16} />
+                  {copy.developer.resolve}
+                </button>
+              </div>
             </article>
           ))}
         </div>

@@ -29,6 +29,9 @@ Parameters:
   SessionSecret:
     Type: String
     NoEcho: true
+  BootstrapAdminThreadsUserId:
+    Type: String
+    Default: "26271207252581685"
   ApiDomainName:
     Type: String
     Description: Custom domain name for API Gateway
@@ -60,6 +63,7 @@ Globals:
         STRIPE_EVENTS_TABLE: !Ref StripeEventsTable
         ADMIN_SETTINGS_TABLE: !Ref AdminSettingsTable
         ADMINS_TABLE: !Ref AdminsTable
+        BOOTSTRAP_ADMIN_THREADS_USER_ID: !Ref BootstrapAdminThreadsUserId
         THREADS_CLIENT_ID: !Ref ThreadsClientId
         THREADS_CLIENT_SECRET: !Ref ThreadsClientSecret
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
@@ -155,20 +159,6 @@ Resources:
             Path: /{proxy+}
             Method: ANY
 
-  PublishPostFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: app/
-      Handler: handlers.publish_post.handler
-      Timeout: 30
-      Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ScheduledPostsTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref ThreadTokensTable
-        - DynamoDBReadPolicy:
-            TableName: !Ref SubscriptionsTable
-        
   PostExecutorFunction:
     Type: AWS::Serverless::Function
     Properties:
