@@ -28,11 +28,12 @@ trial_eligibility_table = dynamodb.Table(os.environ["TRIAL_ELIGIBILITY_TABLE"])
 stripe_events_table = dynamodb.Table(os.environ["STRIPE_EVENTS_TABLE"])
 scheduler = boto3.client("scheduler")
 
-ALLOWED_RETURN_TO = [
+ALLOWED_RETURN_TO = {
     "http://localhost:5173",
-    "https://dev.dbbr2u09r9szv.amplifyapp.com",
+    "https://dev-s4s.aokigk.com",
+    "https://dev-s4s.aokigk.com",
     "https://s4s.aokigk.com",
-]
+}
 
 SUPPORTED_LOCALES = {"ja", "en", "zh", "fil", "vi"}
 SUPPORTED_TIMEZONES = {
@@ -46,8 +47,11 @@ ENTITLED_SUBSCRIPTION_STATUSES = {"trialing", "active"}
 TRIAL_SECONDS = 60 * 60 * 24 * 14
 
 def safe_return_to(value: str | None) -> str:
-    if value in ALLOWED_RETURN_TO:
-        return value
+    normalized = value.rstrip("/") if value else None
+    configured_app_url = os.environ.get("APP_URL", "").rstrip("/")
+
+    if normalized and normalized in ALLOWED_RETURN_TO | {configured_app_url}:
+        return normalized
     return app_url("/")
 
 def get_cookie(event, name: str) -> str | None:

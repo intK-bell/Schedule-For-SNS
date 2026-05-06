@@ -485,9 +485,10 @@ function toScheduledPost(item: ApiScheduledPost): ScheduledPost {
 
 function App() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+  const appUrl = (import.meta.env.VITE_APP_URL as string | undefined)?.replace(/\/$/, "");
 
   const handleThreadsLogin = () => {
-    const returnTo = window.location.origin;
+    const returnTo = appUrl || window.location.origin;
   
     window.location.href =
       `${apiBaseUrl}/auth/threads/start?return_to=${encodeURIComponent(returnTo)}`;

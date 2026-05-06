@@ -105,7 +105,7 @@ frontend:
 必要になったら以下を追加する。
 
 ```text
-https://dev.s4s.aokigk.com/
+https://dev-s4s.aokigk.com/
 ```
 
 ## 6. カスタムドメイン追加
@@ -154,7 +154,7 @@ VITE_API_BASE_URL=https://{prod-api}
 開発 `dev`:
 
 ```text
-VITE_APP_URL=https://dev.s4s.aokigk.com
+VITE_APP_URL=https://dev-s4s.aokigk.com
 VITE_API_BASE_URL=https://{dev-api}
 ```
 
