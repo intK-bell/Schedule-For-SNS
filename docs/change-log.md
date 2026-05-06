@@ -681,3 +681,19 @@ Stripe Checkout APIレスポンスに `trial_included` を追加
 `npm run lint` 成功
 `npm run build` 成功
 `git diff --check` 成功
+
+## 2026-05-06 JST（続き5）
+
+### 変更
+
+dev環境の `AppUrl` を本番URLからdevフロントURLへ変更
+
+Stripe Checkoutの `success_url` / `cancel_url` が環境ごとの `APP_URL` から作られる方針をドキュメントへ明記
+
+devでStripeサンドボックス確認後に本番画面へ戻らないように整理
+
+### 検証
+
+`python3 -m json.tool backend/env/dev.example.json` 成功
+`sam validate --template-file template.yaml --config-file samconfig.toml --config-env dev` 成功
+`git diff --check` 成功

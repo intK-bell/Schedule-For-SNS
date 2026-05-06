@@ -1,6 +1,6 @@
 {
   "StageName": "dev",
-  "AppUrl": "https://s4s.aokigk.com",
+  "AppUrl": "https://dev.dbbr2u09r9szv.amplifyapp.com",
   "ThreadsClientId": "replace_me",
   "ThreadsClientSecret": "replace_me",
   "StripeSecretKey": "sk_test_replace_me",
@@ -8,4 +8,3 @@
   "StripePriceId": "price_replace_me",
   "SessionSecret": "replace_with_long_random_secret"
 }
-

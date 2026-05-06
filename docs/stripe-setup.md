@@ -37,11 +37,13 @@ Checkoutはサブスクリプションモードで作成する。
 - `line_items[0].price=STRIPE_PRICE_ID`
 - `line_items[0].quantity=1`
 - `subscription_data.trial_period_days=14`
-- `success_url=https://s4s.aokigk.com/billing/success`
-- `cancel_url=https://s4s.aokigk.com/billing/cancel`
+- `success_url=${APP_URL}/billing/success`
+- `cancel_url=${APP_URL}/billing/cancel`
 - 顧客メールアドレスをStripe Checkoutで取得する
 
 無料トライアルはStripe CheckoutのSubscription trialで実装する。
+
+`APP_URL` は環境ごとのフロントエンドURLに合わせる。devではdevフロント、本番では本番フロントを指定し、Stripe Checkout後に別環境へ戻らないようにする。
 
 参考: https://docs.stripe.com/payments/checkout/free-trials
 

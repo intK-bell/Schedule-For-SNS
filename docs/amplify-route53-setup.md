@@ -173,9 +173,11 @@ https://{prod-api}/prod/auth/threads/callback
 Stripe Checkout:
 
 ```text
-success_url=https://s4s.aokigk.com/billing/success
-cancel_url=https://s4s.aokigk.com/billing/cancel
+success_url=${APP_URL}/billing/success
+cancel_url=${APP_URL}/billing/cancel
 ```
+
+dev環境では `APP_URL` をdevフロントURLにする。本番URLを指定すると、Stripeサンドボックスの確認後でも本番画面へ戻ってしまう。
 
 Stripe Webhook:
 

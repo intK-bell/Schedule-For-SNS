@@ -80,7 +80,7 @@ sam deploy --config-env prod
 | パラメータ | 内容 |
 | --- | --- |
 | `StageName` | `dev` または `prod` |
-| `AppUrl` | フロントエンドURL。現時点では `https://s4s.aokigk.com` |
+| `AppUrl` | フロントエンドURL。devはdevフロント、本番は本番フロントを指定する |
 | `ThreadsClientId` | Meta AppのClient ID |
 | `ThreadsClientSecret` | Meta AppのClient Secret |
 | `StripeSecretKey` | Stripe Secret Key |
