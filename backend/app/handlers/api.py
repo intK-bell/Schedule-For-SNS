@@ -40,6 +40,7 @@ SUPPORTED_TIMEZONES = {
     "Asia/Manila",
     "Asia/Ho_Chi_Minh",
 }
+ENTITLED_SUBSCRIPTION_STATUSES = {"trialing", "active"}
 
 def safe_return_to(value: str | None) -> str:
     if value in ALLOWED_RETURN_TO:
@@ -80,6 +81,7 @@ def get_authenticated_session(event) -> dict | None:
     return session
 
 def default_user(app_user_id: str) -> dict:
+    now = int(time.time())
     return {
         "app_user_id": app_user_id,
         "threads_user_id": app_user_id,
@@ -87,9 +89,10 @@ def default_user(app_user_id: str) -> dict:
         "locale": "ja",
         "timezone": "Asia/Tokyo",
         "subscription_status": "trialing",
+        "trial_end": now + 60 * 60 * 24 * 14,
         "user_status": "active",
-        "created_at": int(time.time()),
-        "updated_at": int(time.time()),
+        "created_at": now,
+        "updated_at": now,
     }
 
 def get_user(app_user_id: str) -> dict:
@@ -120,6 +123,23 @@ def token_requires_reauth(token: dict | None) -> bool:
         return True
     return read_expires_at(token) <= int(time.time())
 
+def has_subscription_entitlement(user: dict) -> bool:
+    status = user.get("subscription_status", "trialing")
+    if status == "active":
+        return True
+
+    if status != "trialing":
+        return False
+
+    trial_end = int(user.get("trial_end") or 0)
+    return trial_end > int(time.time())
+
+def effective_subscription_status(user: dict) -> str:
+    status = user.get("subscription_status", "trialing")
+    if status == "trialing" and not has_subscription_entitlement(user):
+        return "trial_expired"
+    return status
+
 def get_user_context(event) -> tuple[dict | None, dict | None, dict | None]:
     session = get_authenticated_session(event)
     if not session:
@@ -130,7 +150,13 @@ def get_user_context(event) -> tuple[dict | None, dict | None, dict | None]:
     token = get_token(session["threads_user_id"])
     return session, user, token
 
-def user_guard(event, *, require_active: bool = False, require_threads_ready: bool = False):
+def user_guard(
+    event,
+    *,
+    require_active: bool = False,
+    require_threads_ready: bool = False,
+    require_subscription: bool = False,
+):
     session, user, token = get_user_context(event)
 
     if not session:
@@ -144,6 +170,9 @@ def user_guard(event, *, require_active: bool = False, require_threads_ready: bo
 
     if require_threads_ready and token_requires_reauth(token):
         return None, None, None, response(HTTPStatus.BAD_REQUEST, {"message": "Threads再連携が必要です。再ログインしてください。"})
+
+    if require_subscription and not has_subscription_entitlement(user):
+        return None, None, None, response(HTTPStatus.PAYMENT_REQUIRED, {"message": "無料トライアルが終了しました。月額390円の登録が必要です"})
 
     return session, user, token, None
 
@@ -463,12 +492,14 @@ def handler(event, context):
                 now = int(time.time())
 
                 existing_user = get_user(app_user_id)
+                trial_end = existing_user.get("trial_end") or now + 60 * 60 * 24 * 14
                 write_user(app_user_id, {
                     "threads_user_id": user_id,
                     "display_name": username,
                     "locale": existing_user.get("locale", "ja"),
                     "timezone": existing_user.get("timezone", "Asia/Tokyo"),
                     "subscription_status": existing_user.get("subscription_status", "trialing"),
+                    "trial_end": int(trial_end),
                     "user_status": "active",
                 })
 
@@ -575,7 +606,9 @@ def handler(event, context):
                 "locale": user.get("locale", "ja"),
                 "timezone": user.get("timezone", "Asia/Tokyo"),
                 "user_status": user.get("user_status", "active"),
-                "subscription_status": user.get("subscription_status", "trialing"),
+                "subscription_status": effective_subscription_status(user),
+                "trial_end": int(user.get("trial_end") or 0),
+                "has_subscription_entitlement": has_subscription_entitlement(user),
                 "reauth_required": reauth_required,
                 "token_expires_at": read_expires_at(token),
             },
@@ -712,7 +745,7 @@ def handler(event, context):
         )
     
     if method == "POST" and path == "/threads/test-post":
-        session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True)
+        session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True, require_subscription=True)
         if error_response:
             return error_response
 
@@ -748,10 +781,19 @@ def handler(event, context):
             })
 
     if method == "POST" and path == "/billing/checkout":
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
         stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
 
         checkout_session = stripe.checkout.Session.create(
             mode="subscription",
+            client_reference_id=user["app_user_id"],
+            metadata={
+                "app_user_id": user["app_user_id"],
+                "threads_user_id": session["threads_user_id"],
+            },
             line_items=[
                 {
                     "price": os.environ["STRIPE_PRICE_ID"],
@@ -760,6 +802,10 @@ def handler(event, context):
             ],
             subscription_data={
                 "trial_period_days": 14,
+                "metadata": {
+                    "app_user_id": user["app_user_id"],
+                    "threads_user_id": session["threads_user_id"],
+                },
             },
             success_url=app_url("/billing/success"),
             cancel_url=app_url("/billing/cancel"),
@@ -777,7 +823,7 @@ def handler(event, context):
 
     if method == "POST" and path == "/scheduled-posts":
         try:
-            session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True)
+            session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True, require_subscription=True)
             if error_response:
                 return error_response
 
@@ -891,7 +937,7 @@ def handler(event, context):
         try:
             post_id = path.split("/")[-1]
 
-            session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True)
+            session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True, require_subscription=True)
             if error_response:
                 return error_response
 

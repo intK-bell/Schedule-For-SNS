@@ -590,3 +590,39 @@ SAMテンプレートのYAML構文確認成功
 
 退会時のStripeサブスクリプション終了処理は実装したが、Stripe本番/開発環境で実API疎通確認が必要
 既存thread_tokensデータの暗号化移行は、次回トークン更新または再連携時に順次反映される
+
+## 2026-05-06 JST（続き2）
+
+### 追加
+
+課金要件に、14日間無料トライアル終了後はStripeサブスクリプションがactiveでない限り主要操作を止める方針を追記
+
+無料トライアル中でもStripe Checkoutへ進める「今すぐ登録」ボタンの要件を追加
+
+フロントエンドに「今すぐ登録」ボタンを追加
+ログイン後の通知帯、サイドバーのトライアル表示、設定画面からStripe Checkoutへ遷移できるようにした
+
+トライアル終了時のブロックバナーを追加
+
+### 変更
+
+/me レスポンスに subscription_status、trial_end、has_subscription_entitlement を返すように変更
+
+予約作成、予約編集、テスト投稿APIで、休止状態とThreads再連携要否に加えてサブスクリプション権限もチェックするように変更
+
+PostExecutorFunctionで投稿実行時にもユーザー状態とサブスクリプション権限をチェックするように変更
+
+ログイン時にtrial_endを保持し、既存ユーザーのtrial_endを再ログインでリセットしないように変更
+
+Stripe Checkout作成時にclient_reference_idとmetadataへapp_user_id / threads_user_idを設定するように変更
+
+### 検証
+
+`python3 -m compileall backend/app` 成功
+SAMテンプレートのYAML構文確認成功
+`npm run lint` 成功
+`npm run build` 成功
+
+### 未解決・次回対応
+
+Stripe Webhookでcheckout.session.completed、customer.subscription.*を受け取り、subscription_status、trial_end、current_period_endを同期する実装が必要

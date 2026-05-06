@@ -12,6 +12,7 @@ dynamodb = boto3.resource("dynamodb")
 
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
 thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
+users_table = dynamodb.Table(os.environ["USERS_TABLE"])
 
 
 def now_ts() -> int:
@@ -63,6 +64,12 @@ def to_user_failure_reason(error_text: str) -> str:
 
     if "http error 400" in lowered:
         return "投稿リクエストに問題があり、投稿できませんでした。再度予約してください。"
+
+    if "subscription inactive" in lowered:
+        return "無料トライアルが終了したか、サブスクリプションが無効です。月額390円の登録が必要です。"
+
+    if "user is not active" in lowered:
+        return "休止中のため投稿できませんでした。設定画面から再開してください。"
 
     return "投稿に失敗しました。再度予約してください。"
 
@@ -149,6 +156,27 @@ def get_access_token_by_threads_user_id(threads_user_id: str) -> str:
 
     return access_token
 
+
+def has_subscription_entitlement(user: dict) -> bool:
+    status = user.get("subscription_status", "trialing")
+    if status == "active":
+        return True
+    if status != "trialing":
+        return False
+    return int(user.get("trial_end") or 0) > now_ts()
+
+
+def validate_user_can_post(post: dict):
+    app_user_id = post.get("app_user_id") or post["threads_user_id"]
+    user_res = users_table.get_item(Key={"app_user_id": app_user_id})
+    user = user_res.get("Item") or {}
+
+    if user.get("user_status", "active") != "active":
+        raise Exception("User is not active")
+
+    if not has_subscription_entitlement(user):
+        raise Exception("Subscription inactive")
+
 def handler(event, context):
     print("POST EXECUTOR START", {
         "has_post_id": bool(event.get("post_id")),
@@ -195,6 +223,8 @@ def handler(event, context):
     try:
         threads_user_id = post["threads_user_id"]
         content = post["content"]
+
+        validate_user_can_post(post)
 
         access_token = get_access_token_by_threads_user_id(threads_user_id)
 

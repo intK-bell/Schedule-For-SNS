@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 type View = "calendar" | "posts" | "analytics" | "settings";
 type PostStatus = "scheduled" | "posted" | "failed" | "canceled";
 type UserStatus = "active" | "paused" | "suspended";
+type SubscriptionStatus = "trialing" | "active" | "trial_expired" | "past_due" | "canceled" | "unpaid" | "incomplete";
 type PostSort = "newest" | "oldest" | "status";
 
 type ScheduledPost = {
@@ -109,6 +110,9 @@ function App() {
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [locale, setLocale] = useState("ja");
+  const [subscriptionStatus, setSubscriptionStatus] = useState<SubscriptionStatus>("trialing");
+  const [trialEnd, setTrialEnd] = useState<number | null>(null);
+  const [hasSubscriptionEntitlement, setHasSubscriptionEntitlement] = useState(true);
   const userTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
   const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
@@ -201,6 +205,21 @@ function App() {
     window.location.reload();
   };
 
+  const startCheckout = async () => {
+    const res = await fetch(`${apiBaseUrl}/billing/checkout`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.message ?? "Checkoutの開始に失敗しました");
+      return;
+    }
+
+    window.location.href = data.checkout_url;
+  };
+
   const selectedPosts = posts.filter(
     (post) => post.date === selectedDate && post.status === "scheduled"
   );
@@ -234,7 +253,7 @@ function App() {
   }, [postedPosts]);
 
   const engagement = analytics.likes + analytics.replies + analytics.reposts + analytics.quotes + analytics.shares;
-  const isBlocked = userStatus !== "active" || needsReconnect;
+  const isBlocked = userStatus !== "active" || needsReconnect || !hasSubscriptionEntitlement;
   
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
@@ -270,6 +289,9 @@ function App() {
   
         setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
         setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
+        setSubscriptionStatus(data.subscription_status ?? "trialing");
+        setTrialEnd(data.trial_end ?? null);
+        setHasSubscriptionEntitlement(Boolean(data.has_subscription_entitlement ?? false));
         setLocale(data.locale ?? "ja");
         setSettingsTimezone(data.timezone ?? userTimezone);
         setDraft((current) => ({
@@ -455,7 +477,7 @@ function App() {
         <div className="mobile-header-actions">
           <div className="mobile-trial-chip">
             <Clock3 size={15} />
-            <span>Trial 13日 04:22</span>
+            <span>{billingLabel(subscriptionStatus, trialEnd)}</span>
           </div>
           <button
             aria-expanded={menuOpen}
@@ -475,9 +497,12 @@ function App() {
         </nav>
 
         <div className="trial-panel">
-          <span>無料トライアル</span>
-          <strong>13日 04:22</strong>
+          <span>{subscriptionStatus === "active" ? "サブスク有効" : "無料トライアル"}</span>
+          <strong>{billingLabel(subscriptionStatus, trialEnd)}</strong>
           <small>終了後 税込390円/月</small>
+          <button className="button secondary" onClick={() => void startCheckout()}>
+            今すぐ登録
+          </button>
         </div>
       </aside>
 
@@ -517,7 +542,23 @@ function App() {
         <section className="notice-band">
           <ShieldCheck size={18} />
           <span>Meta App Review向けに、投稿予約と基本分析に必要な最小スコープだけを使います。</span>
+          <button className="button secondary" onClick={() => void startCheckout()}>
+            今すぐ登録
+          </button>
         </section>
+
+        {!hasSubscriptionEntitlement && (
+          <section className="dialog-banner danger">
+            <CreditCard size={20} />
+            <div>
+              <strong>無料トライアルが終了しました</strong>
+              <span>予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。</span>
+            </div>
+            <button className="button dark" onClick={() => void startCheckout()}>
+              今すぐ登録
+            </button>
+          </section>
+        )}
 
         {needsReconnect && (
           <section className="dialog-banner danger">
@@ -576,10 +617,13 @@ function App() {
             onDeleteAccount={deleteAccount}
             onReconnect={handleThreadsReconnect}
             onSaveSettings={saveSettings}
+            onStartCheckout={startCheckout}
             onStatusChange={changeAccountStatus}
             setLocale={setLocale}
             setSettingsTimezone={setSettingsTimezone}
             settingsTimezone={settingsTimezone}
+            subscriptionStatus={subscriptionStatus}
+            trialEnd={trialEnd}
             userStatus={userStatus}
           />
         )}
@@ -605,6 +649,20 @@ function viewTitle(view: View) {
     settings: "設定"
   };
   return titles[view];
+}
+
+function billingLabel(status: SubscriptionStatus, trialEnd: number | null) {
+  if (status === "active") return "登録済み";
+  if (status === "trial_expired") return "トライアル終了";
+  if (status !== "trialing") return "登録が必要";
+  if (!trialEnd) return "トライアル中";
+
+  const remainingSeconds = Math.max(0, trialEnd - Math.floor(Date.now() / 1000));
+  if (remainingSeconds <= 0) return "トライアル終了";
+
+  const days = Math.floor(remainingSeconds / 86400);
+  const hours = Math.floor((remainingSeconds % 86400) / 3600);
+  return `残り${days}日 ${hours}時間`;
 }
 
 function NavButton({
@@ -1022,10 +1080,13 @@ function SettingsView({
   onDeleteAccount,
   onReconnect,
   onSaveSettings,
+  onStartCheckout,
   onStatusChange,
   setLocale,
   setSettingsTimezone,
   settingsTimezone,
+  subscriptionStatus,
+  trialEnd,
   userStatus
 }: {
   locale: string;
@@ -1033,10 +1094,13 @@ function SettingsView({
   onDeleteAccount: () => Promise<void>;
   onReconnect: () => void;
   onSaveSettings: (nextLocale?: string, nextTimezone?: string) => Promise<void>;
+  onStartCheckout: () => Promise<void>;
   onStatusChange: (nextStatus: "active" | "paused") => Promise<void>;
   setLocale: (locale: string) => void;
   setSettingsTimezone: (timezone: string) => void;
   settingsTimezone: string;
+  subscriptionStatus: SubscriptionStatus;
+  trialEnd: number | null;
   userStatus: UserStatus;
 }) {
   return (
@@ -1087,9 +1151,13 @@ function SettingsView({
           </label>
           <SettingRow icon={RefreshCcw} label="Threads連携" value={needsReconnect ? "再連携が必要" : "有効"} />
           <SettingRow icon={PauseCircle} label="利用状態" value={userStatus === "paused" ? "休止中" : "有効"} />
-          <SettingRow icon={CreditCard} label="次回請求" value="2026-05-15 / 税込390円" />
+          <SettingRow icon={CreditCard} label="課金状態" value={billingLabel(subscriptionStatus, trialEnd)} />
         </div>
         <div className="button-row">
+          <button className="button primary" onClick={() => void onStartCheckout()}>
+            <CreditCard size={16} />
+            今すぐ登録
+          </button>
           <button className="button secondary" onClick={onReconnect}>
             <RefreshCcw size={16} />
             Threads再連携

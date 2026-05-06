@@ -183,6 +183,8 @@ Resources:
             TableName: !Ref SessionsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ThreadTokensTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
         - Statement:
             Effect: Allow
             Action:
