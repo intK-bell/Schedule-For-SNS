@@ -274,6 +274,26 @@ def user_guard(
 
     return session, user, token, None
 
+def developer_guard(event):
+    session, user, token, error_response = user_guard(event)
+    if error_response:
+        return None, None, None, error_response
+
+    if session["threads_user_id"] != DEVELOPER_THREADS_USER_ID:
+        return None, None, None, response(HTTPStatus.FORBIDDEN, {"message": "Forbidden"})
+
+    return session, user, token, None
+
+def scan_all(table, **kwargs) -> list[dict]:
+    items = []
+    while True:
+        res = table.scan(**kwargs)
+        items.extend(res.get("Items", []))
+        last_key = res.get("LastEvaluatedKey")
+        if not last_key:
+            return items
+        kwargs["ExclusiveStartKey"] = last_key
+
 def write_user(app_user_id: str, updates: dict) -> dict:
     now = int(time.time())
     current = get_user(app_user_id)
@@ -868,6 +888,71 @@ def handler(event, context):
                 "Set-Cookie": "session=; HttpOnly; Secure; Path=/; Max-Age=0; SameSite=None"
             },
         )
+
+    if method == "GET" and path == "/developer/dashboard":
+        session, user, token, error_response = developer_guard(event)
+        if error_response:
+            return error_response
+
+        users = scan_all(users_table)
+        subscriptions = scan_all(subscriptions_table)
+
+        active_users = [item for item in users if item.get("user_status") != "deleted"]
+        trial_users = [
+            item for item in active_users
+            if effective_subscription_status(item) == "trialing"
+        ]
+        subscribed_users = [
+            item for item in active_users
+            if item.get("subscription_status") == "active"
+        ]
+
+        review_items = []
+        for item in subscriptions:
+            if item.get("requires_admin_review") is not True:
+                continue
+
+            app_user_id = item.get("app_user_id", "")
+            user_item = next((candidate for candidate in users if candidate.get("app_user_id") == app_user_id), {})
+            review_items.append({
+                "app_user_id": app_user_id,
+                "threads_user_id": user_item.get("threads_user_id", ""),
+                "display_name": user_item.get("display_name", ""),
+                "status": item.get("status", ""),
+                "reason": item.get("admin_review_reason", ""),
+                "stripe_subscription_id": item.get("stripe_subscription_id", ""),
+                "stripe_cancel_failed_at": int(item.get("stripe_cancel_failed_at", 0) or 0),
+                "stripe_cancel_error": item.get("stripe_cancel_error", ""),
+                "updated_at": int(item.get("updated_at", 0) or 0),
+            })
+
+        review_items.sort(
+            key=lambda item: item.get("stripe_cancel_failed_at") or item.get("updated_at") or 0,
+            reverse=True,
+        )
+
+        subscribed_count = len(subscribed_users)
+        trial_count = len(trial_users)
+        total_signup_count = len(active_users)
+        conversion_base_count = trial_count + subscribed_count
+        cvr = round((subscribed_count / conversion_base_count) * 100, 1) if conversion_base_count else 0
+
+        return response(HTTPStatus.OK, {
+            "metrics": {
+                "total_users": total_signup_count,
+                "trial_users": trial_count,
+                "subscribed_users": subscribed_count,
+                "conversion_base_users": conversion_base_count,
+                "cvr": cvr,
+                "admin_review_items": len(review_items),
+                "subscriptions_total": len(subscriptions),
+                "subscriptions_requiring_review": len([
+                    item for item in subscriptions
+                    if item.get("requires_admin_review") is True
+                ]),
+            },
+            "admin_review_items": review_items[:100],
+        })
     
     if method == "POST" and path == "/threads/test-post":
         session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True, require_subscription=True)

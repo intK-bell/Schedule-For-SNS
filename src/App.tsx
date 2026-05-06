@@ -56,6 +56,30 @@ type ApiScheduledPost = {
   failure_reason?: string;
 };
 
+type DeveloperDashboard = {
+  metrics: {
+    total_users: number;
+    trial_users: number;
+    subscribed_users: number;
+    conversion_base_users: number;
+    cvr: number;
+    admin_review_items: number;
+    subscriptions_total: number;
+    subscriptions_requiring_review: number;
+  };
+  admin_review_items: Array<{
+    app_user_id: string;
+    threads_user_id: string;
+    display_name: string;
+    status: string;
+    reason: string;
+    stripe_subscription_id: string;
+    stripe_cancel_failed_at: number;
+    stripe_cancel_error: string;
+    updated_at: number;
+  }>;
+};
+
 const localeLabels: Array<{ code: LocaleCode; flag: string; label: string }> = [
   { code: "ja", flag: "🇯🇵", label: "日本語" },
   { code: "en", flag: "🇺🇸", label: "English" },
@@ -193,7 +217,21 @@ const uiText: Record<LocaleCode, any> = {
       title: "開発者画面",
       threadsId: "Threads ID",
       adminReview: "管理者確認",
-      adminReviewBody: "Stripeキャンセル失敗など、手動確認が必要な状態をここから確認できるようにします。",
+      adminReviewBody: "Stripeキャンセル失敗など、手動確認が必要な退会ユーザーです。",
+      loading: "読み込み中...",
+      loadFailed: "開発者データの取得に失敗しました",
+      totalUsers: "有効ユーザー",
+      trialUsers: "トライアル",
+      subscribedUsers: "サブスク",
+      cvr: "CVR",
+      reviewCount: "要確認",
+      subscriptionsTotal: "サブスク記録",
+      noReviewItems: "現在、管理者確認が必要なユーザーはいません。",
+      user: "ユーザー",
+      reason: "理由",
+      stripeSubscription: "Stripe subscription",
+      failedAt: "失敗日時",
+      error: "エラー",
     },
     legal: {
       commerce: "特定商取引法に基づく表記",
@@ -341,7 +379,21 @@ const uiText: Record<LocaleCode, any> = {
       title: "Developer screen",
       threadsId: "Threads ID",
       adminReview: "Admin review",
-      adminReviewBody: "Manual review items such as failed Stripe cancellations will be checked here.",
+      adminReviewBody: "Deleted users that require manual review, such as failed Stripe cancellations.",
+      loading: "Loading...",
+      loadFailed: "Failed to load developer data",
+      totalUsers: "Active users",
+      trialUsers: "Trial",
+      subscribedUsers: "Subscribed",
+      cvr: "CVR",
+      reviewCount: "Needs review",
+      subscriptionsTotal: "Subscription records",
+      noReviewItems: "No users currently require admin review.",
+      user: "User",
+      reason: "Reason",
+      stripeSubscription: "Stripe subscription",
+      failedAt: "Failed at",
+      error: "Error",
     },
     legal: {
       commerce: "Specified Commercial Transaction Act notice",
@@ -527,6 +579,9 @@ function App() {
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isDeveloper, setIsDeveloper] = useState(false);
   const [threadsUserId, setThreadsUserId] = useState("");
+  const [developerDashboard, setDeveloperDashboard] = useState<DeveloperDashboard | null>(null);
+  const [developerLoading, setDeveloperLoading] = useState(false);
+  const [developerError, setDeveloperError] = useState("");
   const [selectedLegalDocument, setSelectedLegalDocument] = useState<LegalDocument | null>(null);
   const [locale, setLocale] = useState<string>(initialLocale);
   const copy = uiText[locale as LocaleCode] ?? uiText.ja;
@@ -658,6 +713,31 @@ function App() {
     window.location.href = data.checkout_url;
   };
 
+  const fetchDeveloperDashboard = useCallback(async () => {
+    if (!isDeveloper) return;
+
+    setDeveloperLoading(true);
+    setDeveloperError("");
+
+    try {
+      const res = await fetch(`${apiBaseUrl}/developer/dashboard`, {
+        credentials: "include",
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setDeveloperError(data.message ?? copy.developer.loadFailed);
+        return;
+      }
+
+      setDeveloperDashboard(data);
+    } catch {
+      setDeveloperError(copy.developer.loadFailed);
+    } finally {
+      setDeveloperLoading(false);
+    }
+  }, [apiBaseUrl, copy.developer.loadFailed, isDeveloper]);
+
   const selectedPosts = posts.filter(
     (post) => post.date === selectedDate && post.status === "scheduled"
   );
@@ -756,6 +836,12 @@ function App() {
         setIsLoggedIn(false);
       });
   }, [apiBaseUrl, fetchScheduledPosts, userTimezone]);
+
+  useEffect(() => {
+    if (isDeveloper && view === "developer" && !developerDashboard && !developerLoading) {
+      void fetchDeveloperDashboard();
+    }
+  }, [developerDashboard, developerLoading, fetchDeveloperDashboard, isDeveloper, view]);
 
   function resetDraft() {
     const nextDateTime = new Date();
@@ -1089,7 +1175,14 @@ function App() {
         )}
 
         {isDeveloper && view === "developer" && (
-          <DeveloperView copy={copy} threadsUserId={threadsUserId} />
+          <DeveloperView
+            copy={copy}
+            dashboard={developerDashboard}
+            error={developerError}
+            isLoading={developerLoading}
+            onRefresh={fetchDeveloperDashboard}
+            threadsUserId={threadsUserId}
+          />
         )}
       </main>
 
@@ -1806,12 +1899,30 @@ function LegalDocumentDialog({
 }
 
 function DeveloperView({
+  dashboard,
+  error,
+  isLoading,
+  onRefresh,
   copy,
   threadsUserId
 }: {
+  dashboard: DeveloperDashboard | null;
+  error: string;
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
   copy: typeof uiText.ja;
   threadsUserId: string;
 }) {
+  const metrics = dashboard?.metrics;
+  const metricItems = [
+    { label: copy.developer.totalUsers, value: metrics?.total_users ?? 0 },
+    { label: copy.developer.trialUsers, value: metrics?.trial_users ?? 0 },
+    { label: copy.developer.subscribedUsers, value: metrics?.subscribed_users ?? 0 },
+    { label: copy.developer.cvr, value: `${metrics?.cvr ?? 0}%` },
+    { label: copy.developer.reviewCount, value: metrics?.admin_review_items ?? 0 },
+    { label: copy.developer.subscriptionsTotal, value: metrics?.subscriptions_total ?? 0 },
+  ];
+
   return (
     <div className="settings-layout">
       <section className="panel">
@@ -1820,10 +1931,54 @@ function DeveloperView({
             <p className="eyebrow">{copy.developer.eyebrow}</p>
             <h2>{copy.developer.title}</h2>
           </div>
+          <button className="button secondary compact" onClick={() => void onRefresh()}>
+            <RefreshCcw size={16} />
+            {isLoading ? copy.developer.loading : copy.reconnect.shortButton}
+          </button>
         </div>
         <div className="settings-list">
           <SettingRow icon={ShieldCheck} label={copy.developer.threadsId} value={threadsUserId || "-"} />
           <SettingRow icon={AlertTriangle} label={copy.developer.adminReview} value={copy.developer.adminReviewBody} />
+        </div>
+      </section>
+      <section className="metric-strip">
+        {metricItems.map((item) => (
+          <div className="metric" key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.value}</strong>
+          </div>
+        ))}
+      </section>
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">{copy.developer.reviewCount}</p>
+            <h2>{copy.developer.adminReview}</h2>
+          </div>
+        </div>
+        {error && <p className="muted-text">{error}</p>}
+        {isLoading && !dashboard && <p className="muted-text">{copy.developer.loading}</p>}
+        {!isLoading && !error && dashboard?.admin_review_items.length === 0 && (
+          <p className="muted-text">{copy.developer.noReviewItems}</p>
+        )}
+        <div className="post-list">
+          {(dashboard?.admin_review_items ?? []).map((item) => (
+            <article className="post-row" key={`${item.app_user_id}-${item.stripe_subscription_id}`}>
+              <div className="status-dot danger">
+                <AlertTriangle size={17} />
+              </div>
+              <div className="post-main">
+                <div className="post-meta">
+                  <span>{copy.developer.user}: {item.display_name || item.threads_user_id || item.app_user_id}</span>
+                  <span>{copy.developer.failedAt}: {formatUnixDate(item.stripe_cancel_failed_at || item.updated_at, copy)}</span>
+                </div>
+                <p>{copy.developer.reason}: {item.reason || "-"}</p>
+                <p>{copy.developer.stripeSubscription}: {item.stripe_subscription_id || "-"}</p>
+                {item.stripe_cancel_error && <p>{copy.developer.error}: {item.stripe_cancel_error}</p>}
+              </div>
+              <strong>{item.status}</strong>
+            </article>
+          ))}
         </div>
       </section>
     </div>
