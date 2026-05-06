@@ -166,6 +166,10 @@ Stripe設定チェックリスト:
 - Webhook eventで `customer.subscription.deleted` を購読する
 - Webhook eventで `invoice.payment_succeeded` を購読する
 - Webhook eventで `invoice.payment_failed` を購読する
+- Webhook受信時はStripe署名を検証し、`stripe_event_id` で二重処理を防ぐ
+- `checkout.session.completed` と `customer.subscription.*` で `subscriptions` と `users.subscription_status` を同期する
+- サブスクリプションが`active`になったユーザーには、無料トライアル表示ではなくサブスク有効表示を出す
+- サブスクリプションが`active`のユーザーには「今すぐ登録」ボタンを表示しない
 
 対象ステータス:
 
@@ -321,7 +325,8 @@ MVP時点で基本分析を搭載する。
 - 月額390円の説明
 - 14日間無料トライアルの説明
 - Stripe Checkoutへ進むボタン
-- ログイン後の上部バナーと設定画面に、無料トライアル中でもStripe Checkoutへ進める「今すぐ登録」ボタンを表示する
+- ログイン後のサイドバーと設定画面に、無料トライアル中でもStripe Checkoutへ進める「今すぐ登録」ボタンを表示する
+- Meta App Review向け通知帯には課金ボタンを重複表示しない
 
 ### メイン画面
 

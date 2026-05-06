@@ -114,6 +114,7 @@ function App() {
   const [trialStartedAt, setTrialStartedAt] = useState<number | null>(null);
   const [trialEnd, setTrialEnd] = useState<number | null>(null);
   const [hasSubscriptionEntitlement, setHasSubscriptionEntitlement] = useState(true);
+  const canStartCheckout = subscriptionStatus !== "active";
   const userTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
   const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
@@ -502,9 +503,11 @@ function App() {
           <span>{subscriptionStatus === "active" ? "サブスク有効" : "無料トライアル"}</span>
           <strong>{billingLabel(subscriptionStatus, trialEnd)}</strong>
           <small>{trialPeriodLabel(trialStartedAt, trialEnd)}</small>
-          <button className="button secondary" onClick={() => void startCheckout()}>
-            今すぐ登録
-          </button>
+          {canStartCheckout && (
+            <button className="button secondary" onClick={() => void startCheckout()}>
+              今すぐ登録
+            </button>
+          )}
         </div>
       </aside>
 
@@ -544,9 +547,6 @@ function App() {
         <section className="notice-band">
           <ShieldCheck size={18} />
           <span>Meta App Review向けに、投稿予約と基本分析に必要な最小スコープだけを使います。</span>
-          <button className="button secondary" onClick={() => void startCheckout()}>
-            今すぐ登録
-          </button>
         </section>
 
         {!hasSubscriptionEntitlement && (
@@ -624,6 +624,7 @@ function App() {
             setLocale={setLocale}
             setSettingsTimezone={setSettingsTimezone}
             settingsTimezone={settingsTimezone}
+            canStartCheckout={canStartCheckout}
             subscriptionStatus={subscriptionStatus}
             trialStartedAt={trialStartedAt}
             trialEnd={trialEnd}
@@ -1103,6 +1104,7 @@ function SettingsView({
   setLocale,
   setSettingsTimezone,
   settingsTimezone,
+  canStartCheckout,
   subscriptionStatus,
   trialStartedAt,
   trialEnd,
@@ -1118,6 +1120,7 @@ function SettingsView({
   setLocale: (locale: string) => void;
   setSettingsTimezone: (timezone: string) => void;
   settingsTimezone: string;
+  canStartCheckout: boolean;
   subscriptionStatus: SubscriptionStatus;
   trialStartedAt: number | null;
   trialEnd: number | null;
@@ -1175,10 +1178,12 @@ function SettingsView({
           <SettingRow icon={Clock3} label="トライアル期間" value={trialPeriodLabel(trialStartedAt, trialEnd)} />
         </div>
         <div className="button-row">
-          <button className="button primary" onClick={() => void onStartCheckout()}>
-            <CreditCard size={16} />
-            今すぐ登録
-          </button>
+          {canStartCheckout && (
+            <button className="button primary" onClick={() => void onStartCheckout()}>
+              <CreditCard size={16} />
+              今すぐ登録
+            </button>
+          )}
           <button className="button secondary" onClick={onReconnect}>
             <RefreshCcw size={16} />
             Threads再連携

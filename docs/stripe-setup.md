@@ -41,7 +41,7 @@ Checkoutはサブスクリプションモードで作成する。
 - `cancel_url=${APP_URL}/billing/cancel`
 - 顧客メールアドレスをStripe Checkoutで取得する
 
-無料トライアルはStripe CheckoutのSubscription trialで実装する。
+無料トライアルはアプリ側で同一Threadsアカウントにつき1回だけ管理する。Stripe Checkoutでは、アプリ側で未使用と判定できる場合だけ `subscription_data.trial_period_days=14` を付与する。
 
 `APP_URL` は環境ごとのフロントエンドURLに合わせる。devではdevフロント、本番では本番フロントを指定し、Stripe Checkout後に別環境へ戻らないようにする。
 
@@ -130,6 +130,8 @@ Stripe Webhookは同じイベントが複数回送られる可能性がある。
 6. 処理後に `stripe_events` へ保存する
 
 これにより、サブスクリプション状態更新や退会処理の二重実行を防ぐ。
+
+`checkout.session.completed` と `customer.subscription.*` では、`subscriptions` と `users.subscription_status` を同期する。これにより、Checkout完了後の `/me` が最新の課金状態を返し、サブスクリプション有効化後は画面上の「今すぐ登録」ボタンを表示しない。
 
 ## 7. サブスクリプション状態の扱い
 

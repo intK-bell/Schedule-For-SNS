@@ -6,6 +6,7 @@ import json
 import secrets
 import time
 import hashlib
+import base64
 import boto3
 import stripe
 from datetime import datetime, timezone, timedelta
@@ -24,6 +25,7 @@ thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 subscriptions_table = dynamodb.Table(os.environ["SUBSCRIPTIONS_TABLE"])
 post_analytics_table = dynamodb.Table(os.environ["POST_ANALYTICS_TABLE"])
 trial_eligibility_table = dynamodb.Table(os.environ["TRIAL_ELIGIBILITY_TABLE"])
+stripe_events_table = dynamodb.Table(os.environ["STRIPE_EVENTS_TABLE"])
 scheduler = boto3.client("scheduler")
 
 ALLOWED_RETURN_TO = [
@@ -162,6 +164,74 @@ def trial_started_at_for_user(user: dict) -> int:
 
 def trial_end_for_user(user: dict) -> int:
     return int(user.get("trial_end") or trial_started_at_for_user(user) + TRIAL_SECONDS)
+
+def event_header(event, name: str) -> str | None:
+    headers = event.get("headers") or {}
+    target = name.lower()
+    for key, value in headers.items():
+        if key.lower() == target:
+            return value
+    return None
+
+def request_body_bytes(event) -> bytes:
+    body = event.get("body") or ""
+    if event.get("isBase64Encoded"):
+        return base64.b64decode(body)
+    return body.encode("utf-8")
+
+def stripe_field(value, name: str):
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+def persist_stripe_subscription(
+    *,
+    app_user_id: str,
+    stripe_customer_id: str | None,
+    subscription,
+    fallback_status: str | None = None,
+) -> None:
+    now = int(time.time())
+    subscription_id = stripe_field(subscription, "id")
+    status = stripe_field(subscription, "status") or fallback_status or "incomplete"
+    current_period_end = stripe_field(subscription, "current_period_end")
+    trial_end = stripe_field(subscription, "trial_end")
+
+    item = {
+        "app_user_id": app_user_id,
+        "status": status,
+        "updated_at": now,
+    }
+
+    if stripe_customer_id:
+        item["stripe_customer_id"] = stripe_customer_id
+    if subscription_id:
+        item["stripe_subscription_id"] = subscription_id
+    if current_period_end:
+        item["current_period_end"] = int(current_period_end)
+    if trial_end:
+        item["trial_end"] = int(trial_end)
+
+    existing = subscriptions_table.get_item(Key={"app_user_id": app_user_id}).get("Item")
+    if existing and existing.get("created_at"):
+        item["created_at"] = int(existing["created_at"])
+    else:
+        item["created_at"] = now
+
+    subscriptions_table.put_item(Item={**(existing or {}), **item})
+
+    user_updates = {
+        "subscription_status": status,
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": subscription_id,
+    }
+
+    if current_period_end:
+        user_updates["current_period_end"] = int(current_period_end)
+    if trial_end:
+        user_updates["stripe_trial_end"] = int(trial_end)
+
+    write_user(app_user_id, {key: value for key, value in user_updates.items() if value})
 
 def get_user_context(event) -> tuple[dict | None, dict | None, dict | None]:
     session = get_authenticated_session(event)
@@ -853,7 +923,80 @@ def handler(event, context):
         return response(HTTPStatus.OK, {"portal_url": app_url("/billing/mock-portal")})
 
     if method == "POST" and path == "/stripe/webhook":
-        # TODO: Verify Stripe signature and store stripe_event_id before processing.
+        stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+        signature = event_header(event, "stripe-signature")
+
+        if not signature:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Missing Stripe signature"})
+
+        try:
+            stripe_event = stripe.Webhook.construct_event(
+                request_body_bytes(event),
+                signature,
+                os.environ["STRIPE_WEBHOOK_SECRET"],
+            )
+        except ValueError:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Invalid Stripe payload"})
+        except stripe.error.SignatureVerificationError:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Invalid Stripe signature"})
+
+        event_id = stripe_field(stripe_event, "id")
+        event_type = stripe_field(stripe_event, "type")
+
+        if not event_id or not event_type:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Invalid Stripe event"})
+
+        try:
+            stripe_events_table.put_item(
+                Item={
+                    "stripe_event_id": event_id,
+                    "event_type": event_type,
+                    "received_at": int(time.time()),
+                },
+                ConditionExpression="attribute_not_exists(stripe_event_id)",
+            )
+        except stripe_events_table.meta.client.exceptions.ConditionalCheckFailedException:
+            return response(HTTPStatus.OK, {"received": True, "duplicate": True})
+
+        data = stripe_field(stripe_event, "data") or {}
+        event_object = stripe_field(data, "object") or {}
+
+        try:
+            if event_type == "checkout.session.completed":
+                app_user_id = stripe_field(event_object, "client_reference_id")
+                metadata = stripe_field(event_object, "metadata") or {}
+                app_user_id = app_user_id or stripe_field(metadata, "app_user_id")
+                stripe_customer_id = stripe_field(event_object, "customer")
+                subscription_id = stripe_field(event_object, "subscription")
+
+                if app_user_id and subscription_id:
+                    subscription = stripe.Subscription.retrieve(subscription_id)
+                    persist_stripe_subscription(
+                        app_user_id=app_user_id,
+                        stripe_customer_id=stripe_customer_id,
+                        subscription=subscription,
+                    )
+
+            if event_type in {
+                "customer.subscription.created",
+                "customer.subscription.updated",
+                "customer.subscription.deleted",
+            }:
+                metadata = stripe_field(event_object, "metadata") or {}
+                app_user_id = stripe_field(metadata, "app_user_id")
+                status = stripe_field(event_object, "status")
+
+                if app_user_id:
+                    persist_stripe_subscription(
+                        app_user_id=app_user_id,
+                        stripe_customer_id=stripe_field(event_object, "customer"),
+                        subscription=event_object,
+                        fallback_status=status,
+                    )
+        except Exception:
+            stripe_events_table.delete_item(Key={"stripe_event_id": event_id})
+            raise
+
         return response(HTTPStatus.OK, {"received": True})
 
     if method == "POST" and path == "/scheduled-posts":
