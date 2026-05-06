@@ -206,8 +206,8 @@ const uiText: Record<LocaleCode, any> = {
       userStatus: "利用状態",
       billingStatus: "課金状態",
       trialPeriod: "トライアル期間",
-      pauseNote: "休止: アカウントを残したまま、本アプリでの予約作成、投稿実行、分析取得を停止します。Threads本体の投稿は削除されません。",
-      deleteNote: "退会: サブスクリプションを終了し、本アプリ上の未投稿予約、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。",
+      pauseNote: "休止: アカウントを残したまま、本アプリでの予約作成、投稿実行、分析取得を停止します。未投稿の予約はキャンセルされ、再開しても自動復活しません。Threads本体の投稿は削除されません。",
+      deleteNote: "退会: サブスクリプションを終了し、本アプリ上の未投稿予約をキャンセルし、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。",
       delete: "退会",
       legalEyebrow: "Legal",
       legalTitle: "法務文書",
@@ -251,7 +251,8 @@ const uiText: Record<LocaleCode, any> = {
     alerts: {
       saveSettingsFailed: "設定の保存に失敗しました",
       statusChangeFailed: "利用状態の変更に失敗しました",
-      deleteConfirm: "退会すると本アプリ上の未投稿予約、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。退会しますか？",
+      pauseConfirm: "休止すると未投稿の予約はキャンセルされ、再開しても自動復活しません。Threads本体の投稿は削除されません。休止しますか？",
+      deleteConfirm: "退会すると本アプリ上の未投稿予約をキャンセルし、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。退会しますか？",
       deleteFailed: "退会処理に失敗しました",
       checkoutFailed: "Checkoutの開始に失敗しました",
       contentRequired: "投稿本文を入力してください",
@@ -373,8 +374,8 @@ const uiText: Record<LocaleCode, any> = {
       userStatus: "Account status",
       billingStatus: "Billing status",
       trialPeriod: "Trial period",
-      pauseNote: "Pause: Keep the account but stop scheduling, publishing, and analytics in this app. Posts already published on Threads are not deleted.",
-      deleteNote: "Delete account: End the subscription and delete this app's pending schedules, posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted.",
+      pauseNote: "Pause: Keep the account but stop scheduling, publishing, and analytics in this app. Pending schedules are canceled and will not be restored automatically after resume. Posts already published on Threads are not deleted.",
+      deleteNote: "Delete account: End the subscription, cancel this app's pending schedules, and delete posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted.",
       delete: "Delete account",
       legalEyebrow: "Legal",
       legalTitle: "Legal documents",
@@ -418,7 +419,8 @@ const uiText: Record<LocaleCode, any> = {
     alerts: {
       saveSettingsFailed: "Failed to save settings",
       statusChangeFailed: "Failed to change account status",
-      deleteConfirm: "Deleting your account will remove this app's pending schedules, posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted. Continue?",
+      pauseConfirm: "Pausing will cancel pending schedules, and they will not be restored automatically after resume. Posts on Threads are not deleted. Continue?",
+      deleteConfirm: "Deleting your account will cancel this app's pending schedules and remove posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted. Continue?",
       deleteFailed: "Failed to delete account",
       checkoutFailed: "Failed to start Checkout",
       contentRequired: "Enter post text",
@@ -682,6 +684,11 @@ function App() {
   };
 
   const changeAccountStatus = async (nextStatus: "active" | "paused") => {
+    if (nextStatus === "paused") {
+      const confirmed = window.confirm(copy.alerts.pauseConfirm);
+      if (!confirmed) return;
+    }
+
     const endpoint = nextStatus === "paused" ? "/account/pause" : "/account/resume";
     const res = await fetch(`${apiBaseUrl}${endpoint}`, {
       method: "POST",
@@ -695,6 +702,7 @@ function App() {
     }
 
     setUserStatus(data.user_status);
+    await fetchScheduledPosts();
   };
 
   const deleteAccount = async () => {

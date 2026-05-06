@@ -383,6 +383,33 @@ def cancel_scheduler_if_present(post: dict):
             "error": str(e),
         })
 
+def cancel_scheduled_posts_for_pause(threads_user_id: str, now: int):
+    posts = scan_all(
+        scheduled_posts_table,
+        FilterExpression=Attr("threads_user_id").eq(threads_user_id) & Attr("status").eq("scheduled"),
+    )
+
+    for post in posts:
+        cancel_scheduler_if_present(post)
+        scheduled_posts_table.update_item(
+            Key={"post_id": post["post_id"]},
+            ConditionExpression="#status = :scheduled",
+            UpdateExpression="""
+                SET #status = :canceled,
+                    failure_reason = :failure_reason,
+                    updated_at = :updated_at
+            """,
+            ExpressionAttributeNames={
+                "#status": "status",
+            },
+            ExpressionAttributeValues={
+                ":scheduled": "scheduled",
+                ":canceled": "canceled",
+                ":failure_reason": "休止により予約をキャンセルしました",
+                ":updated_at": now,
+            },
+        )
+
 def summarize_http_error(error: HTTPError, stage: str) -> tuple[dict, str]:
     raw_body = error.read().decode("utf-8", errors="replace")
     error_code = None
@@ -826,7 +853,12 @@ def handler(event, context):
         if error_response:
             return error_response
 
-        updated = write_user(user["app_user_id"], {"user_status": "paused"})
+        now = int(time.time())
+        cancel_scheduled_posts_for_pause(session["threads_user_id"], now)
+        updated = write_user(user["app_user_id"], {
+            "user_status": "paused",
+            "paused_at": now,
+        })
         return response(HTTPStatus.OK, {"ok": True, "user_status": updated["user_status"]})
 
     if method == "POST" and path == "/account/resume":
