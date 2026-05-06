@@ -118,6 +118,9 @@ function App() {
   const userTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
   const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
+  const [now, setNow] = useState(() => new Date());
+  const headerDate = formatHeaderDate(now, settingsTimezone);
+  const currentUnix = Math.floor(now.getTime() / 1000);
 
   const defaultDateTime = new Date();
   defaultDateTime.setMinutes(defaultDateTime.getMinutes() + 10);
@@ -129,6 +132,13 @@ function App() {
     hour12: false,
   });
   const currentMonth = today.slice(0, 7);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const [selectedDate, setSelectedDate] = useState(today);
   const [visibleMonth, setVisibleMonth] = useState(currentMonth);
@@ -255,7 +265,13 @@ function App() {
   }, [postedPosts]);
 
   const engagement = analytics.likes + analytics.replies + analytics.reposts + analytics.quotes + analytics.shares;
-  const isBlocked = userStatus !== "active" || needsReconnect || !hasSubscriptionEntitlement;
+  const trialActiveByClient =
+    subscriptionStatus === "trialing" &&
+    trialEnd !== null &&
+    trialEnd > currentUnix;
+  const hasEffectiveSubscriptionEntitlement =
+    hasSubscriptionEntitlement || subscriptionStatus === "active" || trialActiveByClient;
+  const isBlocked = userStatus !== "active" || needsReconnect || !hasEffectiveSubscriptionEntitlement;
   
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
 
@@ -514,7 +530,7 @@ function App() {
       <main className="main-surface">
         <header className="topbar">
           <div>
-            <p className="eyebrow">2026年5月1日 金曜日</p>
+            <p className="eyebrow">{headerDate}</p>
             <h1>{viewTitle(view)}</h1>
           </div>
           <div className="topbar-actions">
@@ -549,7 +565,7 @@ function App() {
           <span>Meta App Review向けに、投稿予約と基本分析に必要な最小スコープだけを使います。</span>
         </section>
 
-        {!hasSubscriptionEntitlement && (
+        {!hasEffectiveSubscriptionEntitlement && (
           <section className="dialog-banner danger">
             <CreditCard size={20} />
             <div>
@@ -653,6 +669,20 @@ function viewTitle(view: View) {
     settings: "設定"
   };
   return titles[view];
+}
+
+function formatHeaderDate(date: Date, timeZone: string) {
+  const dateText = new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone,
+  }).format(date);
+  const weekday = new Intl.DateTimeFormat("ja-JP", {
+    weekday: "long",
+    timeZone,
+  }).format(date);
+  return `${dateText} ${weekday}`;
 }
 
 function billingLabel(status: SubscriptionStatus, trialEnd: number | null) {
