@@ -67,6 +67,7 @@ Globals:
         STRIPE_PRICE_ID: !Ref StripePriceId
         SESSION_SECRET: !Ref SessionSecret
         SESSIONS_TABLE: !Ref SessionsTable
+        THREAD_TOKEN_KMS_KEY_ID: !Ref ThreadTokenKmsKey
 
 Resources:
   HttpApi:
@@ -89,6 +90,7 @@ Resources:
           - GET
           - POST
           - PUT
+          - PATCH
           - DELETE
           - OPTIONS
         AllowOrigins:
@@ -137,6 +139,12 @@ Resources:
             Action:
               - iam:PassRole
             Resource: !GetAtt SchedulerInvokeRole.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
       Events:
         Proxy:
           Type: HttpApi
@@ -175,6 +183,11 @@ Resources:
             TableName: !Ref SessionsTable
         - DynamoDBReadPolicy:
             TableName: !Ref ThreadTokensTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
 
   TokenRefreshFunction:
     Type: AWS::Serverless::Function
@@ -189,6 +202,12 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ThreadTokensTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
       Events:
         DailyRefresh:
           Type: Schedule
@@ -233,19 +252,6 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-
-  ThreadTokensTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      AttributeDefinitions:
-        - AttributeName: app_user_id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: app_user_id
-          KeyType: HASH
 
   ScheduledPostsTable:
     Type: AWS::DynamoDB::Table
@@ -389,6 +395,27 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: expires_at
         Enabled: true
+
+  ThreadTokenKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Schedule For SNS Threads access token encryption key
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  ThreadTokenKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/schedule-for-sns-${StageName}-thread-token"
+      TargetKeyId: !Ref ThreadTokenKmsKey
         
   ThreadTokensTable:
     Type: AWS::DynamoDB::Table

@@ -6,6 +6,8 @@ import urllib.request
 import boto3
 from urllib.error import HTTPError
 
+from handlers.token_store import encrypt_access_token, read_access_token, read_expires_at
+
 dynamodb = boto3.resource("dynamodb")
 thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
 
@@ -85,10 +87,34 @@ def handler(event, context):
 
     for item in items:
         threads_user_id = item.get("threads_user_id")
-        access_token = item.get("access_token")
-        expires_at = int(item.get("access_token_expires_at", 0))
 
-        if not threads_user_id or not access_token:
+        if not threads_user_id:
+            skipped += 1
+            continue
+
+        try:
+            access_token = read_access_token(item)
+            expires_at = read_expires_at(item)
+        except Exception as e:
+            failed += 1
+            print("TOKEN REFRESH DECRYPT FAILED", {
+                "threads_user_id": threads_user_id,
+                "error": str(e),
+            })
+            thread_tokens_table.update_item(
+                Key={"threads_user_id": threads_user_id},
+                UpdateExpression="""
+                    SET reauth_required = :reauth_required,
+                        updated_at = :updated_at
+                """,
+                ExpressionAttributeValues={
+                    ":reauth_required": True,
+                    ":updated_at": now,
+                },
+            )
+            continue
+
+        if not access_token:
             skipped += 1
             continue
 
@@ -112,13 +138,14 @@ def handler(event, context):
             thread_tokens_table.update_item(
                 Key={"threads_user_id": threads_user_id},
                 UpdateExpression="""
-                    SET access_token = :access_token,
-                        access_token_expires_at = :expires_at,
+                    SET access_token_encrypted = :access_token_encrypted,
+                        expires_at = :expires_at,
                         reauth_required = :reauth_required,
                         updated_at = :updated_at
+                    REMOVE access_token, access_token_expires_at
                 """,
                 ExpressionAttributeValues={
-                    ":access_token": new_access_token,
+                    ":access_token_encrypted": encrypt_access_token(new_access_token),
                     ":expires_at": now + expires_in,
                     ":reauth_required": False,
                     ":updated_at": now,

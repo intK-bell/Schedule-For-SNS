@@ -108,8 +108,10 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [userStatus, setUserStatus] = useState<UserStatus>("active");
   const [needsReconnect, setNeedsReconnect] = useState(false);
+  const [locale, setLocale] = useState("ja");
   const userTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
+  const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
 
   const defaultDateTime = new Date();
   defaultDateTime.setMinutes(defaultDateTime.getMinutes() + 10);
@@ -134,6 +136,70 @@ function App() {
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+
+  const handleThreadsReconnect = () => {
+    const returnTo = window.location.origin;
+    window.location.href =
+      `${apiBaseUrl}/auth/threads/start?reauth=1&return_to=${encodeURIComponent(returnTo)}`;
+  };
+
+  const saveSettings = async (nextLocale = locale, nextTimezone = settingsTimezone) => {
+    const res = await fetch(`${apiBaseUrl}/me/settings`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        locale: nextLocale,
+        timezone: nextTimezone,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.message ?? "設定の保存に失敗しました");
+      return;
+    }
+
+    setLocale(data.locale);
+    setSettingsTimezone(data.timezone);
+    setDraft((current) => ({ ...current, timezone: data.timezone }));
+  };
+
+  const changeAccountStatus = async (nextStatus: "active" | "paused") => {
+    const endpoint = nextStatus === "paused" ? "/account/pause" : "/account/resume";
+    const res = await fetch(`${apiBaseUrl}${endpoint}`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.message ?? "利用状態の変更に失敗しました");
+      return;
+    }
+
+    setUserStatus(data.user_status);
+  };
+
+  const deleteAccount = async () => {
+    const confirmed = window.confirm("退会すると未投稿予約、投稿本文、分析データ、Threads連携情報を削除します。退会しますか？");
+    if (!confirmed) return;
+
+    const res = await fetch(`${apiBaseUrl}/account`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.message ?? "退会処理に失敗しました");
+      return;
+    }
+
+    window.location.reload();
+  };
 
   const selectedPosts = posts.filter(
     (post) => post.date === selectedDate && post.status === "scheduled"
@@ -204,13 +270,19 @@ function App() {
   
         setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
         setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
+        setLocale(data.locale ?? "ja");
+        setSettingsTimezone(data.timezone ?? userTimezone);
+        setDraft((current) => ({
+          ...current,
+          timezone: data.timezone ?? current.timezone,
+        }));
   
         await fetchScheduledPosts();
       })
       .catch(() => {
         setIsLoggedIn(false);
       });
-  }, [apiBaseUrl, fetchScheduledPosts]);
+  }, [apiBaseUrl, fetchScheduledPosts, userTimezone]);
 
   function resetDraft() {
     const nextDateTime = new Date();
@@ -416,7 +488,15 @@ function App() {
             <h1>{viewTitle(view)}</h1>
           </div>
           <div className="topbar-actions">
-            <select aria-label="表示言語" defaultValue="ja">
+            <select
+              aria-label="表示言語"
+              value={locale}
+              onChange={(event) => {
+                const nextLocale = event.target.value;
+                setLocale(nextLocale);
+                void saveSettings(nextLocale, settingsTimezone);
+              }}
+            >
               {localeLabels.map((locale) => (
                 <option key={locale.code} value={locale.code}>
                   {locale.label}
@@ -446,7 +526,7 @@ function App() {
               <strong>Threads再連携が必要です</strong>
               <span>再連携が完了するまで予約作成と投稿実行は停止されます。</span>
             </div>
-            <button className="button dark" onClick={() => setNeedsReconnect(false)}>
+            <button className="button dark" onClick={handleThreadsReconnect}>
               <RefreshCcw size={16} />
               再連携する
             </button>
@@ -460,7 +540,7 @@ function App() {
               <strong>休止中です</strong>
               <span>利用には再開が必要です。再開するまで予約・分析は停止されます。</span>
             </div>
-            <button className="button dark" onClick={() => setUserStatus("active")}>
+            <button className="button dark" onClick={() => void changeAccountStatus("active")}>
               再開する
             </button>
           </section>
@@ -491,9 +571,15 @@ function App() {
 
         {view === "settings" && (
           <SettingsView
+            locale={locale}
             needsReconnect={needsReconnect}
-            setNeedsReconnect={setNeedsReconnect}
-            setUserStatus={setUserStatus}
+            onDeleteAccount={deleteAccount}
+            onReconnect={handleThreadsReconnect}
+            onSaveSettings={saveSettings}
+            onStatusChange={changeAccountStatus}
+            setLocale={setLocale}
+            setSettingsTimezone={setSettingsTimezone}
+            settingsTimezone={settingsTimezone}
             userStatus={userStatus}
           />
         )}
@@ -931,14 +1017,26 @@ function getMaxReservableDate() {
 }
 
 function SettingsView({
+  locale,
   needsReconnect,
-  setNeedsReconnect,
-  setUserStatus,
+  onDeleteAccount,
+  onReconnect,
+  onSaveSettings,
+  onStatusChange,
+  setLocale,
+  setSettingsTimezone,
+  settingsTimezone,
   userStatus
 }: {
+  locale: string;
   needsReconnect: boolean;
-  setNeedsReconnect: (needsReconnect: boolean) => void;
-  setUserStatus: (status: UserStatus) => void;
+  onDeleteAccount: () => Promise<void>;
+  onReconnect: () => void;
+  onSaveSettings: (nextLocale?: string, nextTimezone?: string) => Promise<void>;
+  onStatusChange: (nextStatus: "active" | "paused") => Promise<void>;
+  setLocale: (locale: string) => void;
+  setSettingsTimezone: (timezone: string) => void;
+  settingsTimezone: string;
   userStatus: UserStatus;
 }) {
   return (
@@ -951,22 +1049,59 @@ function SettingsView({
           </div>
         </div>
         <div className="settings-list">
-          <SettingRow icon={Globe2} label="表示言語" value="日本語" />
-          <SettingRow icon={Clock3} label="タイムゾーン" value="Asia/Tokyo" />
+          <label className="setting-control">
+            <Globe2 size={18} />
+            <span>表示言語</span>
+            <select
+              value={locale}
+              onChange={(event) => {
+                const nextLocale = event.target.value;
+                setLocale(nextLocale);
+                void onSaveSettings(nextLocale, settingsTimezone);
+              }}
+            >
+              {localeLabels.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="setting-control">
+            <Clock3 size={18} />
+            <span>タイムゾーン</span>
+            <select
+              value={settingsTimezone}
+              onChange={(event) => {
+                const nextTimezone = event.target.value;
+                setSettingsTimezone(nextTimezone);
+                void onSaveSettings(locale, nextTimezone);
+              }}
+            >
+              <option value="Asia/Tokyo">Asia/Tokyo</option>
+              <option value="America/Los_Angeles">America/Los_Angeles</option>
+              <option value="Europe/London">Europe/London</option>
+              <option value="Asia/Manila">Asia/Manila</option>
+              <option value="Asia/Ho_Chi_Minh">Asia/Ho_Chi_Minh</option>
+            </select>
+          </label>
           <SettingRow icon={RefreshCcw} label="Threads連携" value={needsReconnect ? "再連携が必要" : "有効"} />
           <SettingRow icon={PauseCircle} label="利用状態" value={userStatus === "paused" ? "休止中" : "有効"} />
           <SettingRow icon={CreditCard} label="次回請求" value="2026-05-15 / 税込390円" />
         </div>
         <div className="button-row">
-          <button className="button secondary" onClick={() => setNeedsReconnect(false)}>
+          <button className="button secondary" onClick={onReconnect}>
             <RefreshCcw size={16} />
             Threads再連携
           </button>
-          <button className="button secondary" onClick={() => setUserStatus(userStatus === "paused" ? "active" : "paused")}>
+          <button
+            className="button secondary"
+            onClick={() => void onStatusChange(userStatus === "paused" ? "active" : "paused")}
+          >
             <PauseCircle size={16} />
             {userStatus === "paused" ? "再開する" : "休止にする"}
           </button>
-          <button className="button danger">
+          <button className="button danger" onClick={() => void onDeleteAccount()}>
             <Trash2 size={16} />
             退会
           </button>

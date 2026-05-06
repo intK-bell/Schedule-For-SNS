@@ -5,6 +5,7 @@ import urllib.request
 import json
 import secrets
 import time
+import hashlib
 import boto3
 import stripe
 from datetime import datetime, timezone, timedelta
@@ -13,11 +14,16 @@ from boto3.dynamodb.conditions import Attr
 from urllib.error import HTTPError
 
 from handlers.common import app_url, redirect, request_method, request_path, response
+from handlers.token_store import encrypt_access_token, read_access_token, read_expires_at
 
 dynamodb = boto3.resource("dynamodb")
+users_table = dynamodb.Table(os.environ["USERS_TABLE"])
 sessions_table = dynamodb.Table(os.environ["SESSIONS_TABLE"])
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
 thread_tokens_table = dynamodb.Table(os.environ["THREAD_TOKENS_TABLE"])
+subscriptions_table = dynamodb.Table(os.environ["SUBSCRIPTIONS_TABLE"])
+post_analytics_table = dynamodb.Table(os.environ["POST_ANALYTICS_TABLE"])
+trial_eligibility_table = dynamodb.Table(os.environ["TRIAL_ELIGIBILITY_TABLE"])
 scheduler = boto3.client("scheduler")
 
 ALLOWED_RETURN_TO = [
@@ -25,6 +31,15 @@ ALLOWED_RETURN_TO = [
     "https://dev.dbbr2u09r9szv.amplifyapp.com",
     "https://s4s.aokigk.com",
 ]
+
+SUPPORTED_LOCALES = {"ja", "en", "zh", "fil", "vi"}
+SUPPORTED_TIMEZONES = {
+    "Asia/Tokyo",
+    "America/Los_Angeles",
+    "Europe/London",
+    "Asia/Manila",
+    "Asia/Ho_Chi_Minh",
+}
 
 def safe_return_to(value: str | None) -> str:
     if value in ALLOWED_RETURN_TO:
@@ -45,6 +60,123 @@ def get_cookie(event, name: str) -> str | None:
             return part.split("=", 1)[1]
 
     return None
+
+def trial_key_hash(threads_user_id: str) -> str:
+    secret = os.environ["SESSION_SECRET"]
+    return hashlib.sha256(f"{secret}:{threads_user_id}".encode("utf-8")).hexdigest()
+
+def get_authenticated_session(event) -> dict | None:
+    session_id = get_cookie(event, "session")
+
+    if not session_id:
+        return None
+
+    session_res = sessions_table.get_item(Key={"session_id": session_id})
+    session = session_res.get("Item")
+
+    if session:
+        session["session_id"] = session_id
+
+    return session
+
+def default_user(app_user_id: str) -> dict:
+    return {
+        "app_user_id": app_user_id,
+        "threads_user_id": app_user_id,
+        "display_name": "",
+        "locale": "ja",
+        "timezone": "Asia/Tokyo",
+        "subscription_status": "trialing",
+        "user_status": "active",
+        "created_at": int(time.time()),
+        "updated_at": int(time.time()),
+    }
+
+def get_user(app_user_id: str) -> dict:
+    user_res = users_table.get_item(Key={"app_user_id": app_user_id})
+    user = user_res.get("Item")
+    return user or default_user(app_user_id)
+
+def get_token(threads_user_id: str) -> dict | None:
+    token_res = thread_tokens_table.get_item(Key={"threads_user_id": threads_user_id})
+    return token_res.get("Item")
+
+def token_requires_reauth(token: dict | None) -> bool:
+    if not token:
+        return True
+    if token.get("reauth_required") is True:
+        return True
+
+    try:
+        access_token = read_access_token(token)
+    except Exception as e:
+        print("THREAD TOKEN DECRYPT ERROR", {
+            "threads_user_id": token.get("threads_user_id"),
+            "error": str(e),
+        })
+        return True
+
+    if not access_token:
+        return True
+    return read_expires_at(token) <= int(time.time())
+
+def get_user_context(event) -> tuple[dict | None, dict | None, dict | None]:
+    session = get_authenticated_session(event)
+    if not session:
+        return None, None, None
+
+    app_user_id = session.get("app_user_id") or session["threads_user_id"]
+    user = get_user(app_user_id)
+    token = get_token(session["threads_user_id"])
+    return session, user, token
+
+def user_guard(event, *, require_active: bool = False, require_threads_ready: bool = False):
+    session, user, token = get_user_context(event)
+
+    if not session:
+        return None, None, None, response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+
+    if user.get("user_status") == "deleted":
+        return None, None, None, response(HTTPStatus.FORBIDDEN, {"message": "退会済みのアカウントです"})
+
+    if require_active and user.get("user_status") != "active":
+        return None, None, None, response(HTTPStatus.FORBIDDEN, {"message": "休止中は操作できません"})
+
+    if require_threads_ready and token_requires_reauth(token):
+        return None, None, None, response(HTTPStatus.BAD_REQUEST, {"message": "Threads再連携が必要です。再ログインしてください。"})
+
+    return session, user, token, None
+
+def write_user(app_user_id: str, updates: dict) -> dict:
+    now = int(time.time())
+    current = get_user(app_user_id)
+    item = {
+        **current,
+        **updates,
+        "app_user_id": app_user_id,
+        "threads_user_id": updates.get("threads_user_id", current.get("threads_user_id", app_user_id)),
+        "updated_at": now,
+    }
+
+    if not item.get("created_at"):
+        item["created_at"] = now
+
+    users_table.put_item(Item=item)
+    return item
+
+def cancel_scheduler_if_present(post: dict):
+    scheduler_name = post.get("scheduler_name")
+    if not scheduler_name:
+        return
+
+    try:
+        delete_schedule(scheduler_name)
+    except Exception as e:
+        print("DELETE SCHEDULER ERROR", {
+            "post_id": post.get("post_id"),
+            "scheduler_name": scheduler_name,
+            "error": str(e),
+        })
 
 def summarize_http_error(error: HTTPError, stage: str) -> tuple[dict, str]:
     raw_body = error.read().decode("utf-8", errors="replace")
@@ -168,6 +300,14 @@ def count_scheduled_posts_on_day(
     )
 
     return len(scan_res.get("Items", []))
+
+def local_scheduled_date(scheduled_dt: datetime, user_timezone: str) -> str:
+    try:
+        tz = ZoneInfo(user_timezone)
+    except Exception:
+        tz = ZoneInfo("Asia/Tokyo")
+
+    return scheduled_dt.astimezone(tz).date().isoformat()
 
 def to_scheduler_time(scheduled_at: str) -> str:
     dt = datetime.fromisoformat(scheduled_at.replace("Z", "+00:00"))
@@ -307,19 +447,35 @@ def handler(event, context):
 
                 with urllib.request.urlopen(user_info_url) as res:
                     user_body = json.loads(res.read())
-                    print("USER INFO", user_body)
+                    print("USER INFO", {
+                        "has_id": bool(user_body.get("id")),
+                        "has_username": bool(user_body.get("username")),
+                    })
 
                     user_id = user_body.get("id")
+                    username = user_body.get("username", "")
 
                 session_id = secrets.token_urlsafe(32)
+                app_user_id = user_id
 
                 expires_at = int(time.time()) + 60 * 60 * 24 * 30
 
                 now = int(time.time())
 
+                existing_user = get_user(app_user_id)
+                write_user(app_user_id, {
+                    "threads_user_id": user_id,
+                    "display_name": username,
+                    "locale": existing_user.get("locale", "ja"),
+                    "timezone": existing_user.get("timezone", "Asia/Tokyo"),
+                    "subscription_status": existing_user.get("subscription_status", "trialing"),
+                    "user_status": "active",
+                })
+
                 sessions_table.put_item(
                     Item={
                         "session_id": session_id,
+                        "app_user_id": app_user_id,
                         "threads_user_id": user_id,
                         "created_at": now,
                         "expires_at": expires_at,
@@ -328,13 +484,34 @@ def handler(event, context):
 
                 thread_tokens_table.put_item(
                     Item={
+                        "app_user_id": app_user_id,
                         "threads_user_id": user_id,
-                        "access_token": access_token,
-                        "access_token_expires_at": access_token_expires_at,
+                        "access_token_encrypted": encrypt_access_token(access_token),
+                        "expires_at": access_token_expires_at,
+                        "scopes": [
+                            "threads_basic",
+                            "threads_content_publish",
+                            "threads_manage_insights",
+                        ],
                         "reauth_required": False,
                         "updated_at": now,
                     }
                 )
+
+                try:
+                    trial_eligibility_table.put_item(
+                        Item={
+                            "trial_key_hash": trial_key_hash(user_id),
+                            "app_user_id": app_user_id,
+                            "threads_user_id": user_id,
+                            "trial_used": True,
+                            "first_trial_started_at": now,
+                            "retained_until": now + 60 * 60 * 24 * 365 * 3,
+                        },
+                        ConditionExpression="attribute_not_exists(trial_key_hash)",
+                    )
+                except trial_eligibility_table.meta.client.exceptions.ConditionalCheckFailedException:
+                    pass
 
                 print("LOGIN SUCCESS", {
                     "user_id": user_id,
@@ -371,6 +548,10 @@ def handler(event, context):
             })
         
     if method == "POST" and path == "/auth/logout":
+        session_id = get_cookie(event, "session")
+        if session_id:
+            sessions_table.delete_item(Key={"session_id": session_id})
+
         return response(
             HTTPStatus.OK,
             {"ok": True},
@@ -380,51 +561,160 @@ def handler(event, context):
         )
 
     if method == "GET" and path == "/me":
-        session_id = get_cookie(event, "session")
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
 
-        if not session_id:
-            return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-        session_res = sessions_table.get_item(Key={"session_id": session_id})
-        session = session_res.get("Item")
-
-        if not session:
-            return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-        token_res = thread_tokens_table.get_item(
-            Key={"threads_user_id": session["threads_user_id"]}
-        )
-
-        token = token_res.get("Item")
-
-        reauth_required = False
-
-        if not token:
-            reauth_required = True
-        elif token.get("reauth_required") is True:
-            reauth_required = True
+        reauth_required = token_requires_reauth(token)
 
         return response(
             HTTPStatus.OK,
             {
-                "app_user_id": session["threads_user_id"],
-                "user_status": "active",
-                "subscription_status": "trialing",
+                "app_user_id": user["app_user_id"],
+                "threads_user_id": session["threads_user_id"],
+                "locale": user.get("locale", "ja"),
+                "timezone": user.get("timezone", "Asia/Tokyo"),
+                "user_status": user.get("user_status", "active"),
+                "subscription_status": user.get("subscription_status", "trialing"),
                 "reauth_required": reauth_required,
+                "token_expires_at": read_expires_at(token),
+            },
+        )
+
+    if method == "PATCH" and path == "/me/settings":
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
+        body = json.loads(event.get("body") or "{}")
+        locale = body.get("locale", user.get("locale", "ja"))
+        user_timezone = body.get("timezone", user.get("timezone", "Asia/Tokyo"))
+
+        if locale not in SUPPORTED_LOCALES:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Unsupported locale"})
+
+        if user_timezone not in SUPPORTED_TIMEZONES:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Unsupported timezone"})
+
+        updated = write_user(user["app_user_id"], {
+            "locale": locale,
+            "timezone": user_timezone,
+        })
+
+        return response(HTTPStatus.OK, {
+            "ok": True,
+            "locale": updated["locale"],
+            "timezone": updated["timezone"],
+        })
+
+    if method == "POST" and path == "/account/pause":
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
+        updated = write_user(user["app_user_id"], {"user_status": "paused"})
+        return response(HTTPStatus.OK, {"ok": True, "user_status": updated["user_status"]})
+
+    if method == "POST" and path == "/account/resume":
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
+        updated = write_user(user["app_user_id"], {"user_status": "active"})
+        return response(HTTPStatus.OK, {"ok": True, "user_status": updated["user_status"]})
+
+    if method == "DELETE" and path == "/account":
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
+        app_user_id = user["app_user_id"]
+        threads_user_id = session["threads_user_id"]
+        now = int(time.time())
+
+        posts_res = scheduled_posts_table.scan(
+            FilterExpression=Attr("threads_user_id").eq(threads_user_id),
+        )
+        for post in posts_res.get("Items", []):
+            if post.get("status") == "scheduled":
+                cancel_scheduler_if_present(post)
+            scheduled_posts_table.delete_item(Key={"post_id": post["post_id"]})
+
+        analytics_res = post_analytics_table.scan(
+            FilterExpression=Attr("app_user_id").eq(app_user_id),
+        )
+        for item in analytics_res.get("Items", []):
+            post_analytics_table.delete_item(
+                Key={
+                    "post_id": item["post_id"],
+                    "analytics_stage": item["analytics_stage"],
+                }
+            )
+
+        subscription_res = subscriptions_table.get_item(Key={"app_user_id": app_user_id})
+        subscription = subscription_res.get("Item")
+        if subscription and subscription.get("stripe_subscription_id"):
+            try:
+                stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+                stripe.Subscription.delete(subscription["stripe_subscription_id"])
+            except Exception as e:
+                print("STRIPE SUBSCRIPTION CANCEL ERROR", {
+                    "app_user_id": app_user_id,
+                    "error": str(e),
+                })
+
+        subscriptions_table.put_item(
+            Item={
+                **(subscription or {"app_user_id": app_user_id}),
+                "app_user_id": app_user_id,
+                "status": "canceled",
+                "updated_at": now,
+            }
+        )
+
+        thread_tokens_table.delete_item(Key={"threads_user_id": threads_user_id})
+        sessions_table.delete_item(Key={"session_id": session["session_id"]})
+
+        users_table.put_item(
+            Item={
+                "app_user_id": app_user_id,
+                "threads_user_id": threads_user_id,
+                "locale": user.get("locale", "ja"),
+                "timezone": user.get("timezone", "Asia/Tokyo"),
+                "subscription_status": "canceled",
+                "user_status": "deleted",
+                "created_at": int(user.get("created_at", now)),
+                "updated_at": now,
+                "deleted_at": now,
+            }
+        )
+
+        trial_eligibility_table.update_item(
+            Key={"trial_key_hash": trial_key_hash(threads_user_id)},
+            UpdateExpression="""
+                SET deleted_at = :deleted_at,
+                    retained_until = :retained_until,
+                    updated_at = :updated_at
+            """,
+            ExpressionAttributeValues={
+                ":deleted_at": now,
+                ":retained_until": now + 60 * 60 * 24 * 365 * 3,
+                ":updated_at": now,
+            },
+        )
+
+        return response(
+            HTTPStatus.OK,
+            {"ok": True},
+            headers={
+                "Set-Cookie": "session=; HttpOnly; Secure; Path=/; Max-Age=0; SameSite=None"
             },
         )
     
     if method == "POST" and path == "/threads/test-post":
-        session_id = get_cookie(event, "session")
-
-        if not session_id:
-            return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-        session_res = sessions_table.get_item(Key={"session_id": session_id})
-        session = session_res.get("Item")
-
-        if not session:
-            return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+        session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True)
+        if error_response:
+            return error_response
 
         body = json.loads(event.get("body") or "{}")
         text = body.get("text", "").strip()
@@ -433,25 +723,11 @@ def handler(event, context):
             return response(HTTPStatus.BAD_REQUEST, {"message": "Text is required"})
 
         try:
-            token_res = thread_tokens_table.get_item(
-                Key={"threads_user_id": session["threads_user_id"]}
-            )
-
-            token = token_res.get("Item")
-
-            if not token or not token.get("access_token"):
-                return response(HTTPStatus.BAD_REQUEST, {
-                    "message": "Threads連携情報が見つかりません。再ログインしてください。"
-                })
-
-            if token.get("reauth_required") is True:
-                return response(HTTPStatus.BAD_REQUEST, {
-                    "message": "Threads再連携が必要です。再ログインしてください。"
-                })
+            access_token = read_access_token(token)
 
             result = post_to_threads(
                 user_id=session["threads_user_id"],
-                access_token=token["access_token"],
+                access_token=access_token,
                 text=text,
             )
 
@@ -501,19 +777,16 @@ def handler(event, context):
 
     if method == "POST" and path == "/scheduled-posts":
         try:
-            session_id = get_cookie(event, "session")
-
-            if not session_id:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-            session_res = sessions_table.get_item(Key={"session_id": session_id})
-            session = session_res.get("Item")
-
-            if not session:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+            session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True)
+            if error_response:
+                return error_response
 
             body = json.loads(event.get("body") or "{}")
-            print("SCHEDULE BODY", body)
+            print("SCHEDULE BODY", {
+                "has_content": bool(body.get("content")),
+                "has_scheduled_at": bool(body.get("scheduled_at")),
+                "timezone": body.get("timezone"),
+            })
 
             content = body.get("content", "").strip()
             scheduled_at = body.get("scheduled_at")
@@ -572,9 +845,11 @@ def handler(event, context):
 
             item = {
                 "post_id": post_id,
+                "app_user_id": user["app_user_id"],
                 "threads_user_id": session["threads_user_id"],
                 "content": content,
                 "scheduled_at": scheduled_at,
+                "scheduled_date": local_scheduled_date(scheduled_dt, user_timezone),
                 "timezone": user_timezone,
                 "status": "scheduled",
                 "scheduler_name": scheduler_name,
@@ -616,16 +891,9 @@ def handler(event, context):
         try:
             post_id = path.split("/")[-1]
 
-            session_id = get_cookie(event, "session")
-
-            if not session_id:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-            session_res = sessions_table.get_item(Key={"session_id": session_id})
-            session = session_res.get("Item")
-
-            if not session:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+            session, user, token, error_response = user_guard(event, require_active=True, require_threads_ready=True)
+            if error_response:
+                return error_response
 
             body = json.loads(event.get("body") or "{}")
 
@@ -710,6 +978,7 @@ def handler(event, context):
                     UpdateExpression="""
                         SET content = :content,
                             scheduled_at = :scheduled_at,
+                            scheduled_date = :scheduled_date,
                             #timezone = :timezone,
                             scheduler_name = :scheduler_name,
                             updated_at = :updated_at
@@ -723,6 +992,7 @@ def handler(event, context):
                         ":scheduled": "scheduled",
                         ":content": content,
                         ":scheduled_at": scheduled_at,
+                        ":scheduled_date": local_scheduled_date(scheduled_dt, user_timezone),
                         ":timezone": user_timezone,
                         ":scheduler_name": new_scheduler_name,
                         ":updated_at": now,
@@ -760,6 +1030,7 @@ def handler(event, context):
                     "threads_user_id": updated_post["threads_user_id"],
                     "content": updated_post["content"],
                     "scheduled_at": updated_post["scheduled_at"],
+                    "scheduled_date": updated_post.get("scheduled_date"),
                     "timezone": updated_post["timezone"],
                     "status": updated_post["status"],
                     "scheduler_name": updated_post.get("scheduler_name"),
@@ -791,16 +1062,9 @@ def handler(event, context):
         try:
             post_id = path.split("/")[-1]
 
-            session_id = get_cookie(event, "session")
-
-            if not session_id:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-            session_res = sessions_table.get_item(Key={"session_id": session_id})
-            session = session_res.get("Item")
-
-            if not session:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+            session, user, token, error_response = user_guard(event, require_active=True)
+            if error_response:
+                return error_response
 
             # ▼ ① post取得
             post_res = scheduled_posts_table.get_item(Key={"post_id": post_id})
@@ -857,16 +1121,9 @@ def handler(event, context):
     
     if method == "GET" and path == "/scheduled-posts":
         try:
-            session_id = get_cookie(event, "session")
-
-            if not session_id:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
-
-            session_res = sessions_table.get_item(Key={"session_id": session_id})
-            session = session_res.get("Item")
-
-            if not session:
-                return response(HTTPStatus.UNAUTHORIZED, {"message": "Unauthorized"})
+            session, user, token, error_response = user_guard(event)
+            if error_response:
+                return error_response
 
             scan_res = scheduled_posts_table.scan(
                 FilterExpression="threads_user_id = :uid",
@@ -886,9 +1143,11 @@ def handler(event, context):
             for item in items:
                 normalized_items.append({
                     "post_id": item["post_id"],
+                    "app_user_id": item.get("app_user_id", item["threads_user_id"]),
                     "threads_user_id": item["threads_user_id"],
                     "content": item["content"],
                     "scheduled_at": item["scheduled_at"],
+                    "scheduled_date": item.get("scheduled_date"),
                     "timezone": item.get("timezone", "Asia/Tokyo"),
                     "status": item.get("status", "scheduled"),
                     "failure_reason": item.get("failure_reason", ""),

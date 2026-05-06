@@ -575,6 +575,23 @@ label.wide {
   border-radius: var(--s4s-radius);
 }
 
+.setting-control {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) minmax(150px, 220px);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--s4s-line);
+  border-radius: var(--s4s-radius);
+  color: var(--s4s-ink);
+}
+
+.setting-control span {
+  color: var(--s4s-muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
 .legal-links a {
   display: block;
   padding: 12px;
@@ -734,7 +751,8 @@ label.wide {
   }
 
   .form-grid,
-  .post-row {
+  .post-row,
+  .setting-control {
     grid-template-columns: 1fr;
   }
 

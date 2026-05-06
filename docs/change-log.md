@@ -536,7 +536,57 @@ OAuthログイン成功ログでsession_idそのものを出力せず、session_
 
 ### 未解決・次回対応
 
-thread_tokensテーブルのKMS暗号化対応
-thread_tokensの項目名を要件上の access_token_encrypted / expires_at へ寄せるか、実装名を要件へ反映するかを最終決定する
-設定、休止、再開、退会APIの実装
-Threads再連携導線の本実装
+thread_tokensテーブルのKMS暗号化対応（2026-05-06続きで対応済み）
+thread_tokensの項目名を要件上の access_token_encrypted / expires_at へ寄せるか、実装名を要件へ反映するかを最終決定する（2026-05-06続きで対応済み）
+設定、休止、再開、退会APIの実装（2026-05-06続きで対応済み）
+Threads再連携導線の本実装（2026-05-06続きで対応済み）
+
+## 2026-05-06 JST（続き）
+
+### 追加
+
+ThreadsアクセストークンのKMS暗号化保存を実装
+
+ThreadTokenKmsKey と alias/schedule-for-sns-{StageName}-thread-token をSAMテンプレートに追加
+
+ApiFunction、PostExecutorFunction、TokenRefreshFunctionに必要なKMS権限を追加
+
+thread_tokensの保存項目名を要件側へ寄せ、access_token_encrypted / expires_at を正式項目として採用
+
+既存データ移行中の互換性確保として、旧項目 access_token / access_token_expires_at も読み取り可能にした
+
+UsersTableへのユーザー保存をログイン時に追加
+
+設定更新API PATCH /me/settings を実装
+
+休止API POST /account/pause と再開API POST /account/resume を実装
+
+退会API DELETE /account を実装
+退会時は未投稿予約のScheduler削除、予約投稿削除、分析データ削除、Threadsトークン削除、現在セッション削除、subscription_status更新、trial_eligibilityの保持期限更新を行う
+
+Threads再連携導線をフロントエンドへ接続
+再連携ボタンから /auth/threads/start?reauth=1 へ遷移するように変更
+
+設定画面の言語、タイムゾーン、休止、再開、退会操作を実APIへ接続
+
+### 変更
+
+予約作成、予約編集、予約削除時に休止状態とThreads再連携要否をバックエンド側でもチェックするように変更
+
+予約投稿データに app_user_id と scheduled_date を保存するように変更
+
+thread_tokensテーブルのパーティションキーは既存実装との互換性を優先して threads_user_id のまま維持し、要件定義にもその方針を明記
+
+トークン更新成功時に旧項目 access_token / access_token_expires_at を削除し、access_token_encrypted / expires_at へ移行するように変更
+
+### 検証
+
+`python3 -m compileall backend/app` 成功
+SAMテンプレートのYAML構文確認成功
+`npm run lint` 成功
+`npm run build` 成功
+
+### 未解決・次回対応
+
+退会時のStripeサブスクリプション終了処理は実装したが、Stripe本番/開発環境で実API疎通確認が必要
+既存thread_tokensデータの暗号化移行は、次回トークン更新または再連携時に順次反映される

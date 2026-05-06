@@ -421,6 +421,8 @@ MVP時点で基本分析を搭載する。
 
 ### thread_tokens
 
+MVPでは既存実装との互換性を優先し、テーブルのパーティションキーは `threads_user_id` とする。`app_user_id` は同一ユーザー識別用の属性として保存する。
+
 - app_user_id
 - threads_user_id
 - access_token_encrypted

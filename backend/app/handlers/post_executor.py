@@ -6,6 +6,8 @@ import urllib.request
 import boto3
 from urllib.error import HTTPError
 
+from handlers.token_store import read_access_token, read_expires_at
+
 dynamodb = boto3.resource("dynamodb")
 
 scheduled_posts_table = dynamodb.Table(os.environ["SCHEDULED_POSTS_TABLE"])
@@ -129,15 +131,19 @@ def get_access_token_by_threads_user_id(threads_user_id: str) -> str:
     if token.get("reauth_required") is True:
         raise Exception("Threads reauth required")
 
-    access_token = token.get("access_token")
+    expires_at = read_expires_at(token)
+    if expires_at and expires_at <= now_ts():
+        raise Exception("Threads token expired error_code=190")
+
+    access_token = read_access_token(token)
 
     if not access_token:
         raise Exception("Access token not found")
 
     print("THREAD TOKEN SELECTED", {
         "threads_user_id": threads_user_id,
-        "has_access_token_expires_at": bool(token.get("access_token_expires_at")),
-        "access_token_expires_at": int(token.get("access_token_expires_at", 0)),
+        "has_expires_at": bool(expires_at),
+        "expires_at": expires_at,
         "reauth_required": bool(token.get("reauth_required", False)),
     })
 
