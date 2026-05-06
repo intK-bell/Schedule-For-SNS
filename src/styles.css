@@ -828,6 +828,8 @@ label.wide {
 
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    align-content: start;
     min-width: 0;
   }
 
@@ -835,6 +837,7 @@ label.wide {
     position: sticky;
     top: 0;
     z-index: 10;
+    align-self: start;
     width: 100%;
     min-width: 0;
     display: grid;
