@@ -198,6 +198,11 @@ button:disabled {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin:20px;
+}
+
+.button-row{
+  margin: 10px 0px;
 }
 
 .button-row.end {
