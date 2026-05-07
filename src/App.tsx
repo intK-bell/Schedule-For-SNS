@@ -902,6 +902,7 @@ function App() {
 
   useEffect(() => {
     if (isLoggedIn !== false || !clarityProjectId) return;
+    if (window.location.hostname !== "s4s.aokigk.com") return;
     if (document.querySelector(`script[data-clarity-project-id="${clarityProjectId}"]`)) return;
 
     const clarityWindow = window as unknown as {
