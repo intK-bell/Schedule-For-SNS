@@ -44,7 +44,7 @@ SUPPORTED_TIMEZONES = {
     "Asia/Manila",
     "Asia/Ho_Chi_Minh",
 }
-ENTITLED_SUBSCRIPTION_STATUSES = {"trialing", "active"}
+TRIAL_ENDING_SUBSCRIPTION_STATUSES = {"trialing", "active"}
 TRIAL_SECONDS = 60 * 60 * 24 * 14
 BOOTSTRAP_ADMIN_THREADS_USER_ID = os.environ.get("BOOTSTRAP_ADMIN_THREADS_USER_ID", "")
 
@@ -169,7 +169,52 @@ def trial_started_at_for_user(user: dict) -> int:
     return int(user.get("created_at") or int(time.time()))
 
 def trial_end_for_user(user: dict) -> int:
-    return int(user.get("trial_end") or trial_started_at_for_user(user) + TRIAL_SECONDS)
+    if user.get("trial_entitlement_ended_at"):
+        return int(user["trial_entitlement_ended_at"])
+
+    if user.get("trial_end"):
+        return int(user["trial_end"])
+
+    trial = get_trial_eligibility(user.get("threads_user_id", user["app_user_id"]))
+    if trial and trial.get("trial_entitlement_ended_at"):
+        return int(trial["trial_entitlement_ended_at"])
+    if trial and trial.get("trial_end"):
+        return int(trial["trial_end"])
+
+    return trial_started_at_for_user(user) + TRIAL_SECONDS
+
+def end_app_trial_for_account(app_user_id: str, now: int, reason: str) -> dict:
+    user = get_user(app_user_id)
+    threads_user_id = user.get("threads_user_id", app_user_id)
+
+    try:
+        trial_eligibility_table.update_item(
+            Key={"trial_key_hash": trial_key_hash(threads_user_id)},
+            UpdateExpression="""
+                SET trial_end = :trial_end,
+                    trial_entitlement_ended_at = :ended_at,
+                    trial_ended_reason = :reason,
+                    updated_at = :updated_at
+            """,
+            ExpressionAttributeValues={
+                ":trial_end": now,
+                ":ended_at": now,
+                ":reason": reason,
+                ":updated_at": now,
+            },
+        )
+    except Exception as e:
+        print("TRIAL ENTITLEMENT END UPDATE ERROR", {
+            "app_user_id": app_user_id,
+            "threads_user_id": threads_user_id,
+            "error": str(e),
+        })
+
+    return {
+        "trial_end": now,
+        "trial_entitlement_ended_at": now,
+        "trial_ended_reason": reason,
+    }
 
 def event_header(event, name: str) -> str | None:
     headers = event.get("headers") or {}
@@ -236,6 +281,8 @@ def persist_stripe_subscription(
         user_updates["current_period_end"] = int(current_period_end)
     if trial_end:
         user_updates["stripe_trial_end"] = int(trial_end)
+    if status in TRIAL_ENDING_SUBSCRIPTION_STATUSES:
+        user_updates.update(end_app_trial_for_account(app_user_id, now, "subscribed"))
 
     write_user(app_user_id, {key: value for key, value in user_updates.items() if value})
 
@@ -409,6 +456,51 @@ def cancel_scheduled_posts_for_pause(threads_user_id: str, now: int):
                 ":updated_at": now,
             },
         )
+
+def cancel_stripe_subscription_for_account(
+    app_user_id: str,
+    now: int,
+    fallback_stripe_subscription_id: str | None = None,
+) -> tuple[str, bool, str | None]:
+    subscription = subscriptions_table.get_item(Key={"app_user_id": app_user_id}).get("Item")
+    stripe_subscription_id = (subscription or {}).get("stripe_subscription_id") or fallback_stripe_subscription_id
+    stripe_cancel_requires_admin_review = False
+    stripe_cancel_error = None
+
+    if stripe_subscription_id and (subscription or {}).get("status") != "canceled":
+        try:
+            stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+            stripe.Subscription.delete(stripe_subscription_id)
+        except Exception as e:
+            stripe_cancel_requires_admin_review = True
+            stripe_cancel_error = str(e)[:1000]
+            print("STRIPE SUBSCRIPTION CANCEL ERROR", {
+                "app_user_id": app_user_id,
+                "stripe_subscription_id": stripe_subscription_id,
+                "error": str(e),
+            })
+
+    status = "cancel_pending_admin_review" if stripe_cancel_requires_admin_review else "canceled"
+    subscription_item = {
+        **(subscription or {"app_user_id": app_user_id}),
+        "app_user_id": app_user_id,
+        "status": status,
+        "updated_at": now,
+        "requires_admin_review": stripe_cancel_requires_admin_review,
+        "admin_review_reason": "stripe_subscription_cancel_failed" if stripe_cancel_requires_admin_review else "",
+    }
+    if stripe_subscription_id:
+        subscription_item["stripe_subscription_id"] = stripe_subscription_id
+
+    if stripe_cancel_requires_admin_review:
+        subscription_item["stripe_cancel_failed_at"] = now
+        subscription_item["stripe_cancel_error"] = stripe_cancel_error or "unknown_error"
+    else:
+        subscription_item.pop("stripe_cancel_failed_at", None)
+        subscription_item.pop("stripe_cancel_error", None)
+
+    subscriptions_table.put_item(Item=subscription_item)
+    return status, stripe_cancel_requires_admin_review, stripe_cancel_error
 
 def summarize_http_error(error: HTTPError, stage: str) -> tuple[dict, str]:
     raw_body = error.read().decode("utf-8", errors="replace")
@@ -855,11 +947,35 @@ def handler(event, context):
 
         now = int(time.time())
         cancel_scheduled_posts_for_pause(session["threads_user_id"], now)
-        updated = write_user(user["app_user_id"], {
+        subscription_status, stripe_cancel_requires_admin_review, stripe_cancel_error = cancel_stripe_subscription_for_account(
+            user["app_user_id"],
+            now,
+            user.get("stripe_subscription_id"),
+        )
+
+        user_updates = {
             "user_status": "paused",
             "paused_at": now,
+            "subscription_status": subscription_status,
+            **end_app_trial_for_account(user["app_user_id"], now, "paused"),
+        }
+        if stripe_cancel_requires_admin_review:
+            user_updates.update({
+                "requires_admin_review": True,
+                "admin_review_reason": "stripe_subscription_cancel_failed",
+                "stripe_cancel_failed_at": now,
+                "stripe_cancel_error": stripe_cancel_error or "unknown_error",
+            })
+
+        updated = write_user(user["app_user_id"], {
+            **user_updates,
         })
-        return response(HTTPStatus.OK, {"ok": True, "user_status": updated["user_status"]})
+        return response(HTTPStatus.OK, {
+            "ok": True,
+            "user_status": updated["user_status"],
+            "subscription_status": effective_subscription_status(updated),
+            "has_subscription_entitlement": has_subscription_entitlement(updated),
+        })
 
     if method == "POST" and path == "/account/resume":
         session, user, token, error_response = user_guard(event)
@@ -897,40 +1013,11 @@ def handler(event, context):
                 }
             )
 
-        subscription_res = subscriptions_table.get_item(Key={"app_user_id": app_user_id})
-        subscription = subscription_res.get("Item")
-        stripe_cancel_requires_admin_review = False
-        stripe_cancel_error = None
-        if subscription and subscription.get("stripe_subscription_id"):
-            try:
-                stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-                stripe.Subscription.delete(subscription["stripe_subscription_id"])
-            except Exception as e:
-                stripe_cancel_requires_admin_review = True
-                stripe_cancel_error = str(e)[:1000]
-                print("STRIPE SUBSCRIPTION CANCEL ERROR", {
-                    "app_user_id": app_user_id,
-                    "stripe_subscription_id": subscription["stripe_subscription_id"],
-                    "error": str(e),
-                })
-
-        subscription_item = {
-            **(subscription or {"app_user_id": app_user_id}),
-            "app_user_id": app_user_id,
-            "status": "cancel_pending_admin_review" if stripe_cancel_requires_admin_review else "canceled",
-            "updated_at": now,
-            "requires_admin_review": stripe_cancel_requires_admin_review,
-            "admin_review_reason": "stripe_subscription_cancel_failed" if stripe_cancel_requires_admin_review else "",
-        }
-
-        if stripe_cancel_requires_admin_review:
-            subscription_item["stripe_cancel_failed_at"] = now
-            subscription_item["stripe_cancel_error"] = stripe_cancel_error or "unknown_error"
-        else:
-            subscription_item.pop("stripe_cancel_failed_at", None)
-            subscription_item.pop("stripe_cancel_error", None)
-
-        subscriptions_table.put_item(Item=subscription_item)
+        _, stripe_cancel_requires_admin_review, stripe_cancel_error = cancel_stripe_subscription_for_account(
+            app_user_id,
+            now,
+            user.get("stripe_subscription_id"),
+        )
 
         thread_tokens_table.delete_item(Key={"threads_user_id": threads_user_id})
         sessions_table.delete_item(Key={"session_id": session["session_id"]})
@@ -942,6 +1029,7 @@ def handler(event, context):
             "timezone": user.get("timezone", "Asia/Tokyo"),
             "subscription_status": "canceled",
             "user_status": "deleted",
+            **end_app_trial_for_account(app_user_id, now, "deleted"),
             "created_at": int(user.get("created_at", now)),
             "updated_at": now,
             "deleted_at": now,

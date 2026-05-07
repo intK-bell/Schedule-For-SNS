@@ -26,7 +26,7 @@ type LegalDocument = "commerce" | "terms" | "privacy";
 type LocaleCode = "ja" | "en" | "zh" | "fil" | "vi";
 type PostStatus = "scheduled" | "posted" | "failed" | "canceled";
 type UserStatus = "active" | "paused" | "suspended";
-type SubscriptionStatus = "trialing" | "active" | "trial_expired" | "past_due" | "canceled" | "unpaid" | "incomplete";
+type SubscriptionStatus = "trialing" | "active" | "trial_expired" | "past_due" | "canceled" | "unpaid" | "incomplete" | "cancel_pending_admin_review";
 type PostSort = "newest" | "oldest" | "status";
 
 type ScheduledPost = {
@@ -206,7 +206,7 @@ const uiText: Record<LocaleCode, any> = {
       userStatus: "利用状態",
       billingStatus: "課金状態",
       trialPeriod: "トライアル期間",
-      pauseNote: "休止: アカウントを残したまま、本アプリでの予約作成、投稿実行、分析取得を停止します。未投稿の予約はキャンセルされ、再開しても自動復活しません。Threads本体の投稿は削除されません。",
+      pauseNote: "休止: アカウントを残したまま、Stripeサブスクリプションを停止し、本アプリでの予約作成、投稿実行、分析取得を停止します。未投稿の予約はキャンセルされ、再開しても自動復活しません。再開後の利用には再登録が必要です。Threads本体の投稿は削除されません。",
       deleteNote: "退会: サブスクリプションを終了し、本アプリ上の未投稿予約をキャンセルし、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。",
       delete: "退会",
       legalEyebrow: "Legal",
@@ -251,7 +251,7 @@ const uiText: Record<LocaleCode, any> = {
     alerts: {
       saveSettingsFailed: "設定の保存に失敗しました",
       statusChangeFailed: "利用状態の変更に失敗しました",
-      pauseConfirm: "休止すると未投稿の予約はキャンセルされ、再開しても自動復活しません。Threads本体の投稿は削除されません。休止しますか？",
+      pauseConfirm: "休止するとStripeサブスクリプションを停止し、未投稿の予約はキャンセルされ、再開しても自動復活しません。再開後の利用には再登録が必要です。Threads本体の投稿は削除されません。休止しますか？",
       deleteConfirm: "退会すると本アプリ上の未投稿予約をキャンセルし、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。退会しますか？",
       deleteFailed: "退会処理に失敗しました",
       checkoutFailed: "Checkoutの開始に失敗しました",
@@ -374,7 +374,7 @@ const uiText: Record<LocaleCode, any> = {
       userStatus: "Account status",
       billingStatus: "Billing status",
       trialPeriod: "Trial period",
-      pauseNote: "Pause: Keep the account but stop scheduling, publishing, and analytics in this app. Pending schedules are canceled and will not be restored automatically after resume. Posts already published on Threads are not deleted.",
+      pauseNote: "Pause: Keep the account but stop the Stripe subscription, scheduling, publishing, and analytics in this app. Pending schedules are canceled and will not be restored automatically after resume. Resuming use requires subscribing again. Posts already published on Threads are not deleted.",
       deleteNote: "Delete account: End the subscription, cancel this app's pending schedules, and delete posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted.",
       delete: "Delete account",
       legalEyebrow: "Legal",
@@ -419,7 +419,7 @@ const uiText: Record<LocaleCode, any> = {
     alerts: {
       saveSettingsFailed: "Failed to save settings",
       statusChangeFailed: "Failed to change account status",
-      pauseConfirm: "Pausing will cancel pending schedules, and they will not be restored automatically after resume. Posts on Threads are not deleted. Continue?",
+      pauseConfirm: "Pausing will stop the Stripe subscription, cancel pending schedules, and they will not be restored automatically after resume. Resuming use requires subscribing again. Posts on Threads are not deleted. Continue?",
       deleteConfirm: "Deleting your account will cancel this app's pending schedules and remove posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted. Continue?",
       deleteFailed: "Failed to delete account",
       checkoutFailed: "Failed to start Checkout",
@@ -614,8 +614,6 @@ function App() {
   const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
   const [now, setNow] = useState(() => new Date());
   const headerDate = formatHeaderDate(now, settingsTimezone, copy);
-  const currentUnix = Math.floor(now.getTime() / 1000);
-
   const defaultDateTime = new Date();
   defaultDateTime.setMinutes(defaultDateTime.getMinutes() + 10);
 
@@ -702,6 +700,12 @@ function App() {
     }
 
     setUserStatus(data.user_status);
+    if (data.subscription_status) {
+      setSubscriptionStatus(data.subscription_status);
+    }
+    if (typeof data.has_subscription_entitlement === "boolean") {
+      setHasSubscriptionEntitlement(data.has_subscription_entitlement);
+    }
     await fetchScheduledPosts();
   };
 
@@ -815,15 +819,9 @@ function App() {
   }, [postedPosts]);
 
   const engagement = analytics.likes + analytics.replies + analytics.reposts + analytics.quotes + analytics.shares;
-  const trialActiveByClient =
-    trialEnd !== null &&
-    trialEnd > currentUnix;
-  const displaySubscriptionStatus =
-    subscriptionStatus !== "active" && trialActiveByClient
-      ? "trialing"
-      : subscriptionStatus;
+  const displaySubscriptionStatus = subscriptionStatus;
   const hasEffectiveSubscriptionEntitlement =
-    hasSubscriptionEntitlement || subscriptionStatus === "active" || trialActiveByClient;
+    hasSubscriptionEntitlement || subscriptionStatus === "active";
   const isBlocked = userStatus !== "active" || needsReconnect || !hasEffectiveSubscriptionEntitlement;
   
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
