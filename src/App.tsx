@@ -61,6 +61,21 @@ type ApiScheduledPost = {
   metrics?: ScheduledPost["metrics"];
 };
 
+type CurrentUserResponse = {
+  needs_reconnect?: boolean;
+  needsReconnect?: boolean;
+  is_developer?: boolean;
+  isDeveloper?: boolean;
+  user_status?: UserStatus;
+  userStatus?: UserStatus;
+  subscription_status?: SubscriptionStatus;
+  trial_started_at?: number | null;
+  trial_end?: number | null;
+  has_subscription_entitlement?: boolean;
+  locale?: LocaleCode;
+  timezone?: string;
+};
+
 type DeveloperDashboard = {
   metrics: {
     total_users: number;
@@ -879,42 +894,83 @@ function App() {
     setPosts((data.items ?? []).map(toScheduledPost));
   }, [apiBaseUrl]);
 
-  useEffect(() => {
-    fetch(`${apiBaseUrl}/me`, {
+  const applyCurrentUser = useCallback((data: CurrentUserResponse) => {
+    const nextUserStatus = String(data.user_status ?? data.userStatus ?? "active").toLowerCase();
+    setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
+    setIsDeveloper(Boolean(data.is_developer ?? data.isDeveloper ?? false));
+    setUserStatus(["active", "paused", "suspended"].includes(nextUserStatus) ? nextUserStatus as UserStatus : "active");
+    setSubscriptionStatus(data.subscription_status ?? "trialing");
+    setTrialStartedAt(data.trial_started_at ?? null);
+    setTrialEnd(data.trial_end ?? null);
+    setHasSubscriptionEntitlement(Boolean(data.has_subscription_entitlement ?? false));
+    setLocale(data.locale ?? "ja");
+    window.localStorage.setItem("s4s_locale", data.locale ?? "ja");
+    setSettingsTimezone(data.timezone ?? userTimezone);
+    setDraft((current) => ({
+      ...current,
+      timezone: data.timezone ?? current.timezone,
+    }));
+  }, [userTimezone]);
+
+  const fetchCurrentUser = useCallback(async () => {
+    const res = await fetch(`${apiBaseUrl}/me`, {
       credentials: "include",
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          setIsLoggedIn(false);
-          return;
-        }
-  
-        const data = await res.json();
-        setIsLoggedIn(true);
-  
-        console.log("ME RESULT", data);
-  
-        setNeedsReconnect(Boolean(data.needs_reconnect ?? data.needsReconnect ?? false));
-        setIsDeveloper(Boolean(data.is_developer ?? data.isDeveloper ?? false));
-        setUserStatus((data.user_status ?? data.userStatus ?? "active").toLowerCase());
-        setSubscriptionStatus(data.subscription_status ?? "trialing");
-        setTrialStartedAt(data.trial_started_at ?? null);
-        setTrialEnd(data.trial_end ?? null);
-        setHasSubscriptionEntitlement(Boolean(data.has_subscription_entitlement ?? false));
-        setLocale(data.locale ?? "ja");
-        window.localStorage.setItem("s4s_locale", data.locale ?? "ja");
-        setSettingsTimezone(data.timezone ?? userTimezone);
-        setDraft((current) => ({
-          ...current,
-          timezone: data.timezone ?? current.timezone,
-        }));
-  
-        await fetchScheduledPosts();
-      })
-      .catch(() => {
-        setIsLoggedIn(false);
+    });
+
+    if (!res.ok) {
+      setIsLoggedIn(false);
+      return false;
+    }
+
+    const data = await res.json();
+    setIsLoggedIn(true);
+
+    console.log("ME RESULT", data);
+    applyCurrentUser(data);
+    await fetchScheduledPosts();
+
+    return Boolean(data.has_subscription_entitlement ?? false) || data.subscription_status === "active";
+  }, [apiBaseUrl, applyCurrentUser, fetchScheduledPosts]);
+
+  useEffect(() => {
+    let isCancelled = false;
+    const billingResult = new URLSearchParams(window.location.search).get("billing");
+
+    const wait = (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        window.setTimeout(resolve, milliseconds);
       });
-  }, [apiBaseUrl, fetchScheduledPosts, userTimezone]);
+
+    const loadCurrentUser = async () => {
+      try {
+        let hasEntitlement = await fetchCurrentUser();
+        if (isCancelled) return;
+
+        if (billingResult === "success" && !hasEntitlement) {
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            await wait(1500);
+            if (isCancelled) return;
+            hasEntitlement = await fetchCurrentUser();
+            if (hasEntitlement) break;
+          }
+        }
+
+        if (billingResult) {
+          window.history.replaceState(null, "", window.location.pathname || "/");
+        }
+      } catch {
+        if (!isCancelled) {
+          setIsLoggedIn(false);
+        }
+      }
+    };
+
+    void loadCurrentUser();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [fetchCurrentUser]);
 
   useEffect(() => {
     if (isLoggedIn !== false || !clarityProjectId) return;

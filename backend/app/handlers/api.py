@@ -1266,8 +1266,8 @@ def handler(event, context):
                 }
             ],
             subscription_data=subscription_data,
-            success_url=app_url("/billing/success"),
-            cancel_url=app_url("/billing/cancel"),
+            success_url=app_url("/?billing=success"),
+            cancel_url=app_url("/?billing=cancel"),
         )
 
         return response(HTTPStatus.OK, {
