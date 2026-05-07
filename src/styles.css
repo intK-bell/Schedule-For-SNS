@@ -362,6 +362,26 @@ textarea {
   min-height: 48px;
 }
 
+.login-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: center;
+}
+
+.login-legal-links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--s4s-primary-dark);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
 .language-panel {
   display: grid;
   gap: 10px;

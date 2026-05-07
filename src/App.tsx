@@ -1053,8 +1053,27 @@ function App() {
             </button>
 
             <p className="muted-text">{copy.trialOffer}</p>
+
+            <div className="login-legal-links" aria-label={copy.settings.legalTitle}>
+              <button type="button" onClick={() => setSelectedLegalDocument("commerce")}>
+                {copy.legal.commerce}
+              </button>
+              <button type="button" onClick={() => setSelectedLegalDocument("terms")}>
+                {copy.legal.terms}
+              </button>
+              <button type="button" onClick={() => setSelectedLegalDocument("privacy")}>
+                {copy.legal.privacy}
+              </button>
+            </div>
           </div>
         </div>
+        {selectedLegalDocument && (
+          <LegalDocumentDialog
+            copy={copy}
+            document={selectedLegalDocument}
+            onClose={() => setSelectedLegalDocument(null)}
+          />
+        )}
       </div>
     );
   }
