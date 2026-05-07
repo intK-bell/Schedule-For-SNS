@@ -1091,7 +1091,20 @@ function App() {
   }
 
   if (isLoggedIn === null) {
-    return <div>{copy.loading}</div>;
+    return (
+      <div className="loading-page">
+        <div className="loading-panel">
+          <div className="brand-lockup">
+            <div className="brand-mark">S4S</div>
+            <div>
+              <strong>Schedule For SNS</strong>
+              <span>{copy.loading}</span>
+            </div>
+          </div>
+          <div className="loading-bar" aria-hidden="true" />
+        </div>
+      </div>
+    );
   }
 
   if (!isLoggedIn) {

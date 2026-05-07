@@ -289,6 +289,55 @@ textarea {
   background: #eef3f8;
 }
 
+.loading-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+  background: #eef3f8;
+}
+
+.loading-panel {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 18px;
+  padding: 28px;
+  border: 1px solid var(--s4s-line);
+  border-radius: var(--s4s-radius);
+  background: var(--s4s-surface);
+  box-shadow: var(--s4s-shadow);
+}
+
+.loading-bar {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dce6ee;
+}
+
+.loading-bar::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 40%;
+  border-radius: inherit;
+  background: var(--s4s-primary);
+  animation: loading-slide 1.1s ease-in-out infinite;
+  content: "";
+}
+
+@keyframes loading-slide {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(350%);
+  }
+}
+
 .login-shell {
   display: grid;
   grid-template-columns: minmax(280px, 1.05fr) minmax(320px, 0.95fr);
