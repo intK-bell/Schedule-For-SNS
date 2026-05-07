@@ -119,6 +119,7 @@ const uiText: Record<LocaleCode, any> = {
       period: (start: string, end: string) => `開始 ${start} / 終了 ${end}`,
       unset: "未設定",
       checkout: "今すぐ登録",
+      portal: "支払い方法を変更",
       expiredTitle: "無料トライアルが終了しました",
       expiredBody: (period: string) => `${period}。予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。`,
     },
@@ -287,6 +288,7 @@ const uiText: Record<LocaleCode, any> = {
       period: (start: string, end: string) => `Start ${start} / End ${end}`,
       unset: "Not set",
       checkout: "Subscribe now",
+      portal: "Update payment method",
       expiredTitle: "Your free trial has ended",
       expiredBody: (period: string) => `${period}. Scheduling, editing, publishing, and analytics require the ¥390/month plan.`,
     },
@@ -740,6 +742,21 @@ function App() {
     }
 
     window.location.href = data.checkout_url;
+  };
+
+  const openBillingPortal = async () => {
+    const res = await fetch(`${apiBaseUrl}/billing/portal`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.message ?? copy.alerts.checkoutFailed);
+      return;
+    }
+
+    window.location.href = data.portal_url;
   };
 
   const fetchDeveloperDashboard = useCallback(async () => {
@@ -1212,6 +1229,7 @@ function App() {
             locale={locale}
             needsReconnect={needsReconnect}
             onDeleteAccount={deleteAccount}
+            onOpenBillingPortal={openBillingPortal}
             onOpenLegalDocument={setSelectedLegalDocument}
             onReconnect={handleThreadsReconnect}
             onSaveSettings={saveSettings}
@@ -1800,6 +1818,7 @@ function SettingsView({
   locale,
   needsReconnect,
   onDeleteAccount,
+  onOpenBillingPortal,
   onOpenLegalDocument,
   onReconnect,
   onSaveSettings,
@@ -1818,6 +1837,7 @@ function SettingsView({
   locale: string;
   needsReconnect: boolean;
   onDeleteAccount: () => Promise<void>;
+  onOpenBillingPortal: () => Promise<void>;
   onOpenLegalDocument: (document: LegalDocument) => void;
   onReconnect: () => void;
   onSaveSettings: (nextLocale?: string, nextTimezone?: string) => Promise<void>;
@@ -1907,6 +1927,10 @@ function SettingsView({
           )}
           {canManagePaidAccount && (
             <>
+              <button className="button primary" onClick={() => void onOpenBillingPortal()}>
+                <CreditCard size={16} />
+                {copy.billing.portal}
+              </button>
               <button
                 className="button secondary"
                 onClick={() => void onStatusChange(userStatus === "paused" ? "active" : "paused")}

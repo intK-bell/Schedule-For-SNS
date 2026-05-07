@@ -66,6 +66,7 @@ Globals:
         BOOTSTRAP_ADMIN_THREADS_USER_ID: !Ref BootstrapAdminThreadsUserId
         THREADS_CLIENT_ID: !Ref ThreadsClientId
         THREADS_CLIENT_SECRET: !Ref ThreadsClientSecret
+        THREADS_REDIRECT_URI: !Sub "https://${ApiDomainName}/auth/threads/callback"
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         STRIPE_PRICE_ID: !Ref StripePriceId

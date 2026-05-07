@@ -32,7 +32,6 @@ scheduler = boto3.client("scheduler")
 ALLOWED_RETURN_TO = {
     "http://localhost:5173",
     "https://dev-s4s.aokigk.com",
-    "https://dev-s4s.aokigk.com",
     "https://s4s.aokigk.com",
 }
 
@@ -55,6 +54,16 @@ def safe_return_to(value: str | None) -> str:
     if normalized and normalized in ALLOWED_RETURN_TO | {configured_app_url}:
         return normalized
     return app_url("/")
+
+def allowed_cors_origin(event) -> str:
+    origin = event_header(event, "origin")
+    configured_app_url = os.environ.get("APP_URL", "").rstrip("/")
+    allowed_origins = ALLOWED_RETURN_TO | {configured_app_url}
+
+    if origin and origin.rstrip("/") in allowed_origins:
+        return origin.rstrip("/")
+
+    return configured_app_url or "http://localhost:5173"
 
 def get_cookie(event, name: str) -> str | None:
     # HTTP API v2 では event["cookies"] に入ることが多い
@@ -674,16 +683,16 @@ def handler(event, context):
             HTTPStatus.NO_CONTENT,
             {},
             headers={
-                "Access-Control-Allow-Origin": "http://localhost:5173",
+                "Access-Control-Allow-Origin": allowed_cors_origin(event),
                 "Access-Control-Allow-Credentials": "true",
                 "Access-Control-Allow-Headers": "content-type, authorization",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             },
         )
 
     if method == "GET" and path == "/auth/threads/start":
         client_id = os.environ["THREADS_CLIENT_ID"]
-        redirect_uri = "https://api-dev.s4s.aokigk.com/auth/threads/callback"
+        redirect_uri = os.environ["THREADS_REDIRECT_URI"]
 
         query = event.get("queryStringParameters") or {}
         return_to = safe_return_to(query.get("return_to"))
@@ -709,7 +718,7 @@ def handler(event, context):
 
         client_id = os.environ["THREADS_CLIENT_ID"]
         client_secret = os.environ["THREADS_CLIENT_SECRET"]
-        redirect_uri = "https://api-dev.s4s.aokigk.com/auth/threads/callback"
+        redirect_uri = os.environ["THREADS_REDIRECT_URI"]
 
         print("OAUTH CONFIG", {
             "client_id": client_id,
@@ -1267,8 +1276,21 @@ def handler(event, context):
         })
 
     if method == "POST" and path == "/billing/portal":
-        # TODO: Create Stripe Billing Portal session for payment method management.
-        return response(HTTPStatus.OK, {"portal_url": app_url("/billing/mock-portal")})
+        session, user, token, error_response = user_guard(event)
+        if error_response:
+            return error_response
+
+        stripe_customer_id = user.get("stripe_customer_id")
+        if not stripe_customer_id:
+            return response(HTTPStatus.BAD_REQUEST, {"message": "Stripe customer not found"})
+
+        stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
+        portal_session = stripe.billing_portal.Session.create(
+            customer=stripe_customer_id,
+            return_url=app_url("/"),
+        )
+
+        return response(HTTPStatus.OK, {"portal_url": portal_session.url})
 
     if method == "POST" and path == "/stripe/webhook":
         stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
