@@ -29,6 +29,19 @@ Parameters:
   SessionSecret:
     Type: String
     NoEcho: true
+  BootstrapAdminThreadsUserId:
+    Type: String
+    Default: "26271207252581685"
+  ApiDomainName:
+    Type: String
+    Description: Custom domain name for API Gateway
+    Default: api-dev.s4s.aokigk.com
+  ApiCertificateArn:
+    Type: String
+    Description: ACM certificate ARN for API custom domain
+  HostedZoneId:
+    Type: String
+    Description: Route 53 Hosted Zone ID for aokigk.com
 
 Globals:
   Function:
@@ -50,37 +63,56 @@ Globals:
         STRIPE_EVENTS_TABLE: !Ref StripeEventsTable
         ADMIN_SETTINGS_TABLE: !Ref AdminSettingsTable
         ADMINS_TABLE: !Ref AdminsTable
+        BOOTSTRAP_ADMIN_THREADS_USER_ID: !Ref BootstrapAdminThreadsUserId
         THREADS_CLIENT_ID: !Ref ThreadsClientId
         THREADS_CLIENT_SECRET: !Ref ThreadsClientSecret
+        THREADS_REDIRECT_URI: !Sub "https://${ApiDomainName}/auth/threads/callback"
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
         STRIPE_WEBHOOK_SECRET: !Ref StripeWebhookSecret
         STRIPE_PRICE_ID: !Ref StripePriceId
         SESSION_SECRET: !Ref SessionSecret
+        SESSIONS_TABLE: !Ref SessionsTable
+        THREAD_TOKEN_KMS_KEY_ID: !Ref ThreadTokenKmsKey
 
 Resources:
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
       StageName: !Ref StageName
+      Domain:
+        DomainName: !Ref ApiDomainName
+        CertificateArn: !Ref ApiCertificateArn
+        EndpointConfiguration: REGIONAL
+        Route53:
+          HostedZoneId: !Ref HostedZoneId
       CorsConfiguration:
         AllowCredentials: true
         AllowHeaders:
           - Content-Type
           - Cookie
+          - Authorization
         AllowMethods:
           - GET
           - POST
           - PUT
+          - PATCH
           - DELETE
           - OPTIONS
         AllowOrigins:
           - !Ref AppUrl
+          - http://localhost:5173
 
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: app/
       Handler: handlers.api.handler
+      Environment:
+        Variables:
+          POST_EXECUTOR_FUNCTION_ARN: !GetAtt PostExecutorFunction.Arn
+          SCHEDULER_INVOKE_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
+          SCHEDULER_GROUP_NAME: default
+          THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref UsersTable
@@ -91,6 +123,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref SubscriptionsTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref PostAnalyticsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref TrialEligibilityTable
         - DynamoDBCrudPolicy:
             TableName: !Ref StripeEventsTable
@@ -98,12 +132,26 @@ Resources:
             TableName: !Ref AdminSettingsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref AdminsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SessionsTable
         - Statement:
             Effect: Allow
             Action:
               - scheduler:CreateSchedule
               - scheduler:DeleteSchedule
+              - scheduler:GetSchedule
             Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt SchedulerInvokeRole.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
       Events:
         Proxy:
           Type: HttpApi
@@ -112,19 +160,68 @@ Resources:
             Path: /{proxy+}
             Method: ANY
 
-  PublishPostFunction:
+  PostExecutorFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: app/
-      Handler: handlers.publish_post.handler
+      Handler: handlers.post_executor.handler
       Timeout: 30
+      Environment:
+        Variables:
+          ANALYTICS_SYNC_FUNCTION_ARN: !GetAtt AnalyticsSyncFunction.Arn
+          SCHEDULER_GROUP_NAME: default
+          SCHEDULER_INVOKE_ROLE_ARN: !GetAtt SchedulerInvokeRole.Arn
+          THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ScheduledPostsTable
         - DynamoDBReadPolicy:
+            TableName: !Ref SessionsTable
+        - DynamoDBReadPolicy:
             TableName: !Ref ThreadTokensTable
         - DynamoDBReadPolicy:
-            TableName: !Ref SubscriptionsTable
+            TableName: !Ref UsersTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
+        - Statement:
+            Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+            Resource: "*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - iam:PassRole
+            Resource: !GetAtt SchedulerInvokeRole.Arn
+
+  TokenRefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: app/
+      Handler: handlers.token_refresh.handler
+      Timeout: 60
+      Environment:
+        Variables:
+          THREAD_TOKENS_TABLE: !Ref ThreadTokensTable
+          THREADS_CLIENT_SECRET: !Ref ThreadsClientSecret
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ThreadTokensTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
+      Events:
+        DailyRefresh:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 18 * * ? *)
+            Enabled: true
 
   AnalyticsSyncFunction:
     Type: AWS::Serverless::Function
@@ -141,6 +238,13 @@ Resources:
             TableName: !Ref ThreadTokensTable
         - DynamoDBReadPolicy:
             TableName: !Ref SubscriptionsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt ThreadTokenKmsKey.Arn
 
   UsersTable:
     Type: AWS::DynamoDB::Table
@@ -163,19 +267,6 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-
-  ThreadTokensTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      BillingMode: PAY_PER_REQUEST
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: true
-      AttributeDefinitions:
-        - AttributeName: app_user_id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: app_user_id
-          KeyType: HASH
 
   ScheduledPostsTable:
     Type: AWS::DynamoDB::Table
@@ -202,6 +293,25 @@ Resources:
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
+
+  SchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AllowInvokeLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: "*"
 
   SubscriptionsTable:
     Type: AWS::DynamoDB::Table
@@ -285,7 +395,60 @@ Resources:
         - AttributeName: admin_threads_user_id
           KeyType: HASH
 
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: session_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: session_id
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+
+  ThreadTokenKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Schedule For SNS Threads access token encryption key
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAccountRoot
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  ThreadTokenKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/schedule-for-sns-${StageName}-thread-token"
+      TargetKeyId: !Ref ThreadTokenKmsKey
+        
+  ThreadTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: threads_user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: threads_user_id
+          KeyType: HASH
+
 Outputs:
   ApiUrl:
     Description: HTTP API endpoint
     Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  CustomApiUrl:
+    Description: Custom API endpoint
+    Value: !Sub "https://${ApiDomainName}"

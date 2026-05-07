@@ -105,7 +105,7 @@ frontend:
 必要になったら以下を追加する。
 
 ```text
-https://dev.s4s.aokigk.com/
+https://dev-s4s.aokigk.com/
 ```
 
 ## 6. カスタムドメイン追加
@@ -154,7 +154,7 @@ VITE_API_BASE_URL=https://{prod-api}
 開発 `dev`:
 
 ```text
-VITE_APP_URL=https://dev.s4s.aokigk.com
+VITE_APP_URL=https://dev-s4s.aokigk.com
 VITE_API_BASE_URL=https://{dev-api}
 ```
 
@@ -173,9 +173,11 @@ https://{prod-api}/prod/auth/threads/callback
 Stripe Checkout:
 
 ```text
-success_url=https://s4s.aokigk.com/billing/success
-cancel_url=https://s4s.aokigk.com/billing/cancel
+success_url=${APP_URL}/billing/success
+cancel_url=${APP_URL}/billing/cancel
 ```
+
+dev環境では `APP_URL` をdevフロントURLにする。本番URLを指定すると、Stripeサンドボックスの確認後でも本番画面へ戻ってしまう。
 
 Stripe Webhook:
 

@@ -90,6 +90,19 @@ button:disabled {
   font-weight: 800;
 }
 
+.date-cell.disabled {
+  opacity: 0.35;
+  background: #f1f5f9;
+  color: #94a3b8;
+  border-color: #e2e8f0;
+  cursor: not-allowed;
+}
+
+.date-cell.disabled:hover {
+  transform: none;
+  box-shadow: none;
+}
+
 .nav-stack {
   display: grid;
   gap: 8px;
@@ -185,6 +198,11 @@ button:disabled {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  margin:20px;
+}
+
+.button-row{
+  margin: 10px 0px;
 }
 
 .button-row.end {
@@ -236,6 +254,11 @@ textarea {
   font-weight: 700;
 }
 
+.button.compact {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .button.primary,
 .button.dark {
   background: var(--s4s-primary);
@@ -256,6 +279,150 @@ textarea {
   background: #fff1f0;
   color: var(--s4s-danger);
   border-color: #ffcbc5;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+  background: #eef3f8;
+}
+
+.login-shell {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.05fr) minmax(320px, 0.95fr);
+  align-items: stretch;
+  width: min(980px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--s4s-line);
+  border-radius: var(--s4s-radius);
+  background: var(--s4s-surface);
+  box-shadow: var(--s4s-shadow);
+}
+
+.login-copy {
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  padding: clamp(28px, 5vw, 56px);
+  background: #102232;
+  color: #f9fbfd;
+}
+
+.login-brand .brand-mark {
+  background: #1b4450;
+}
+
+.login-copy h1 {
+  max-width: 11ch;
+  margin: 0;
+  font-size: clamp(2.5rem, 7vw, 5.4rem);
+  line-height: 0.94;
+  letter-spacing: 0;
+}
+
+.login-copy p {
+  max-width: 520px;
+  margin: 0;
+  color: #c4d3df;
+  font-size: 1.05rem;
+  line-height: 1.7;
+}
+
+.login-highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.login-highlights span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 8%);
+  color: #e7eff6;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.login-card {
+  display: grid;
+  align-content: center;
+  gap: 18px;
+  padding: clamp(24px, 4vw, 44px);
+}
+
+.login-button {
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
+}
+
+.login-legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: center;
+}
+
+.login-legal-links button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--s4s-primary-dark);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.language-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.language-panel > span {
+  color: var(--s4s-muted);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.language-pills {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.language-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  min-height: 42px;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--s4s-line);
+  border-radius: var(--s4s-radius);
+  background: #fff;
+  color: var(--s4s-text);
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.language-pill.active {
+  border-color: var(--s4s-primary);
+  background: #e6f7f5;
+  color: var(--s4s-primary-dark);
+}
+
+.language-pill span {
+  flex: 0 0 auto;
 }
 
 .notice-band,
@@ -464,6 +631,19 @@ label.wide {
   gap: 10px;
 }
 
+.account-action-notes {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.account-action-notes p {
+  margin: 0;
+  color: var(--s4s-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
 .post-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -562,13 +742,54 @@ label.wide {
   border-radius: var(--s4s-radius);
 }
 
-.legal-links a {
-  display: block;
+.setting-row-value {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.setting-control {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) minmax(150px, 220px);
+  align-items: center;
+  gap: 10px;
   padding: 12px;
   border: 1px solid var(--s4s-line);
   border-radius: var(--s4s-radius);
+  color: var(--s4s-ink);
+}
+
+.setting-control span {
+  color: var(--s4s-muted);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.legal-links button {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--s4s-line);
+  border-radius: var(--s4s-radius);
+  background: #fff;
   color: var(--s4s-primary-dark);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
   text-decoration: none;
+}
+
+.legal-modal {
+  max-height: min(82vh, 760px);
+}
+
+.legal-document-text {
+  max-height: 56vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--s4s-text);
+  line-height: 1.65;
 }
 
 .modal-backdrop {
@@ -617,14 +838,28 @@ label.wide {
 }
 
 @media (max-width: 980px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .login-copy h1 {
+    max-width: none;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+    align-content: start;
+    min-width: 0;
   }
 
   .sidebar {
     position: sticky;
     top: 0;
     z-index: 10;
+    align-self: start;
+    width: 100%;
+    min-width: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
@@ -681,8 +916,10 @@ label.wide {
 
   .nav-stack.open {
     grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
     gap: 6px;
   }
 
@@ -703,9 +940,17 @@ label.wide {
 }
 
 @media (max-width: 640px) {
+  .login-page {
+    padding: 14px;
+  }
+
+  .language-pills {
+    grid-template-columns: 1fr;
+  }
+
   .main-surface,
   .sidebar {
-    padding: 16px;
+    padding: 12px;
   }
 
   .topbar,
@@ -721,7 +966,8 @@ label.wide {
   }
 
   .form-grid,
-  .post-row {
+  .post-row,
+  .setting-control {
     grid-template-columns: 1fr;
   }
 
@@ -757,6 +1003,10 @@ label.wide {
 
   .nav-button span {
     font-size: 0.82rem;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .post-meta {
@@ -818,5 +1068,11 @@ label.wide {
 
   .setting-row strong {
     grid-column: 2;
+  }
+
+  .setting-row-value {
+    grid-column: 2;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }
