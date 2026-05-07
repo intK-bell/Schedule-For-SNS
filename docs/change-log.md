@@ -953,6 +953,18 @@ Stripe Billing PortalのモックURLを廃止し、Stripe Billing Portal session
 
 `sam validate --template-file template.yaml --config-file samconfig.toml --config-env prod` 成功
 
+## 2026-05-08 JST
+
+### 追加
+
+ログイン前画面だけでMicrosoft Clarityタグを読み込む処理を追加
+
+フロントエンド環境変数 `VITE_CLARITY_PROJECT_ID` を追加
+
+### 検証
+
+`npm run build` 成功
+
 ## 2026-05-07 JST（続き5）
 
 ### 追加

@@ -220,6 +220,7 @@ const uiText: Record<LocaleCode, any> = {
       back: "戻る",
       reserve: "予約する",
       update: "更新する",
+      sending: "送信中...",
     },
     developer: {
       eyebrow: "Developer",
@@ -389,6 +390,7 @@ const uiText: Record<LocaleCode, any> = {
       back: "Back",
       reserve: "Schedule",
       update: "Update",
+      sending: "Sending...",
     },
     developer: {
       eyebrow: "Developer",
@@ -578,6 +580,7 @@ function toScheduledPost(item: ApiScheduledPost): ScheduledPost {
 function App() {
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
   const appUrl = (import.meta.env.VITE_APP_URL as string | undefined)?.replace(/\/$/, "");
+  const clarityProjectId = import.meta.env.VITE_CLARITY_PROJECT_ID as string | undefined;
 
   const handleThreadsLogin = () => {
     const returnTo = appUrl || window.location.origin;
@@ -646,6 +649,8 @@ function App() {
   });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isPreparingConfirm, setIsPreparingConfirm] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   const handleThreadsReconnect = () => {
     const returnTo = window.location.origin;
@@ -896,6 +901,27 @@ function App() {
   }, [apiBaseUrl, fetchScheduledPosts, userTimezone]);
 
   useEffect(() => {
+    if (isLoggedIn !== false || !clarityProjectId) return;
+    if (document.querySelector(`script[data-clarity-project-id="${clarityProjectId}"]`)) return;
+
+    const clarityWindow = window as unknown as {
+      clarity?: (...args: unknown[]) => void;
+    };
+
+    clarityWindow.clarity = clarityWindow.clarity || function (...args: unknown[]) {
+      const queuedClarity = clarityWindow.clarity as unknown as { q?: unknown[] };
+      queuedClarity.q = queuedClarity.q || [];
+      queuedClarity.q.push(args);
+    };
+
+    const script = document.createElement("script");
+    script.async = true;
+    script.dataset.clarityProjectId = clarityProjectId;
+    script.src = `https://www.clarity.ms/tag/${clarityProjectId}`;
+    document.head.appendChild(script);
+  }, [clarityProjectId, isLoggedIn]);
+
+  useEffect(() => {
     if (isDeveloper && view === "developer" && !developerDashboard && !developerLoading) {
       void fetchDeveloperDashboard();
     }
@@ -921,6 +947,8 @@ function App() {
   }
 
   function beginEdit(post: ScheduledPost) {
+    setShowConfirm(false);
+    setIsPreparingConfirm(false);
     setEditingId(post.id);
     setDraft({
       date: post.date,
@@ -931,77 +959,95 @@ function App() {
     setView("calendar");
   }
 
+  function openConfirmDialog() {
+    if (isPreparingConfirm || showConfirm) return;
+
+    setIsPreparingConfirm(true);
+    window.setTimeout(() => {
+      setShowConfirm(true);
+      setIsPreparingConfirm(false);
+    }, 0);
+  }
+
   async function saveDraft() {
+    if (isSavingDraft) return;
+
     if (!draft.content.trim()) {
       alert(copy.alerts.contentRequired);
       return;
     }
-  
-    const scheduledAt = new Date(`${draft.date}T${draft.time}:00`).toISOString();
-  
-    const url = editingId
-      ? `${apiBaseUrl}/scheduled-posts/${editingId}`
-      : `${apiBaseUrl}/scheduled-posts`;
 
-    const method = editingId ? "PUT" : "POST";
+    setIsSavingDraft(true);
 
-    const res = await fetch(url, {
-      method,
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        content: draft.content.trim(),
-        scheduled_at: scheduledAt,
-        timezone: draft.timezone,
-      }),
-    });
-  
-    const data = await res.json();
-    console.log("SCHEDULE RESULT", data);
-  
-    if (!res.ok) {
-      alert(data.message || copy.alerts.scheduleFailed);
-      return;
-    }
-  
-    const saved = data.post;
-  
-    if (editingId) {
-      setPosts((current) =>
-        current.map((post) =>
-          post.id === editingId
-            ? {
-                ...post,
-                content: saved.content,
-                date: draft.date,
-                time: draft.time,
-                timezone: saved.timezone,
-                status: "scheduled",
-              }
-            : post
-        )
-      );
-    } else {
-      setPosts((current) => [
-        {
-          id: saved.post_id,
-          content: saved.content,
-          date: draft.date,
-          time: draft.time,
-          timezone: saved.timezone,
-          status: "scheduled",
+    try {
+      const scheduledAt = new Date(`${draft.date}T${draft.time}:00`).toISOString();
+
+      const url = editingId
+        ? `${apiBaseUrl}/scheduled-posts/${editingId}`
+        : `${apiBaseUrl}/scheduled-posts`;
+
+      const method = editingId ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
         },
-        ...current,
-      ]);
+        body: JSON.stringify({
+          content: draft.content.trim(),
+          scheduled_at: scheduledAt,
+          timezone: draft.timezone,
+        }),
+      });
+
+      const data = await res.json();
+      console.log("SCHEDULE RESULT", data);
+
+      if (!res.ok) {
+        alert(data.message || copy.alerts.scheduleFailed);
+        return;
+      }
+
+      const saved = data.post;
+
+      if (editingId) {
+        setPosts((current) =>
+          current.map((post) =>
+            post.id === editingId
+              ? {
+                  ...post,
+                  content: saved.content,
+                  date: draft.date,
+                  time: draft.time,
+                  timezone: saved.timezone,
+                  status: "scheduled",
+                }
+              : post
+          )
+        );
+      } else {
+        setPosts((current) => [
+          {
+            id: saved.post_id,
+            content: saved.content,
+            date: draft.date,
+            time: draft.time,
+            timezone: saved.timezone,
+            status: "scheduled",
+          },
+          ...current,
+        ]);
+      }
+
+      setSelectedDate(draft.date);
+      setEditingId(null);
+      setShowConfirm(false);
+      resetDraft();
+      alert(editingId ? copy.alerts.updated : copy.alerts.scheduled);
+    } finally {
+      setIsSavingDraft(false);
     }
-  
-    setSelectedDate(draft.date);
-    setEditingId(null);
-    setShowConfirm(false);
-    resetDraft();
-    alert(editingId ? copy.alerts.updated : copy.alerts.scheduled);
   }
 
   async function deletePost(id: string) {
@@ -1024,6 +1070,13 @@ function App() {
     }
   
     setPosts((current) => current.filter((post) => post.id !== id));
+
+    if (editingId === id) {
+      setEditingId(null);
+      setShowConfirm(false);
+      setIsPreparingConfirm(false);
+      resetDraft();
+    }
   }
 
   function cloneFailed(post: ScheduledPost) {
@@ -1205,14 +1258,15 @@ function App() {
             activePosts={activePosts}
             draft={draft}
             editingId={editingId}
+            isPreparingConfirm={isPreparingConfirm}
             isBlocked={isBlocked}
+            onRequestConfirm={openConfirmDialog}
             copy={copy}
             remainingSlots={remainingSlots}
             selectedDate={selectedDate}
             selectedPosts={selectedPosts}
             setDraft={setDraft}
             setSelectedDate={setSelectedDate}
-            setShowConfirm={setShowConfirm}
             setVisibleMonth={setVisibleMonth}
             visibleMonth={visibleMonth}
           />
@@ -1264,6 +1318,7 @@ function App() {
           draft={draft}
           editingId={editingId}
           copy={copy}
+          isSubmitting={isSavingDraft}
           onCancel={() => setShowConfirm(false)}
           onConfirm={saveDraft}
         />
@@ -1394,13 +1449,14 @@ function CalendarView({
   copy,
   draft,
   editingId,
+  isPreparingConfirm,
   isBlocked,
+  onRequestConfirm,
   remainingSlots,
   selectedDate,
   selectedPosts,
   setDraft,
   setSelectedDate,
-  setShowConfirm,
   setVisibleMonth,
   visibleMonth
 }: {
@@ -1408,13 +1464,14 @@ function CalendarView({
   copy: typeof uiText.ja;
   draft: { date: string; time: string; timezone: string; content: string };
   editingId: string | null;
+  isPreparingConfirm: boolean;
   isBlocked: boolean;
+  onRequestConfirm: () => void;
   remainingSlots: number;
   selectedDate: string;
   selectedPosts: ScheduledPost[];
   setDraft: (draft: { date: string; time: string; timezone: string; content: string }) => void;
   setSelectedDate: (date: string) => void;
-  setShowConfirm: (show: boolean) => void;
   setVisibleMonth: (month: string) => void;
   visibleMonth: string;
 }) {
@@ -1569,11 +1626,11 @@ function CalendarView({
           <span>{draft.content.length}/500</span>
           <button
             className="button primary"
-            disabled={!canSubmit}
-            onClick={() => setShowConfirm(true)}
+            disabled={!canSubmit || isPreparingConfirm}
+            onClick={onRequestConfirm}
             title={submitDisabledReason || copy.calendar.validTitle}
           >
-            {copy.calendar.confirm}
+            {isPreparingConfirm ? copy.settings.sending : copy.calendar.confirm}
           </button>
           {!canSubmit && (
             <p className="form-hint error">
@@ -2125,14 +2182,16 @@ function ConfirmDialog({
   copy,
   draft,
   editingId,
+  isSubmitting,
   onCancel,
   onConfirm
 }: {
   copy: typeof uiText.ja;
   draft: { date: string; time: string; timezone: string; content: string };
   editingId: string | null;
+  isSubmitting: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
 }) {
   return (
     <div className="modal-backdrop" role="presentation">
@@ -2155,11 +2214,11 @@ function ConfirmDialog({
           </div>
         </dl>
         <div className="button-row end">
-          <button className="button secondary" onClick={onCancel}>
+          <button className="button secondary" disabled={isSubmitting} onClick={onCancel}>
             {copy.settings.back}
           </button>
-          <button className="button primary" onClick={onConfirm}>
-            {editingId ? copy.settings.update : copy.settings.reserve}
+          <button className="button primary" disabled={isSubmitting} onClick={() => void onConfirm()}>
+            {isSubmitting ? copy.settings.sending : editingId ? copy.settings.update : copy.settings.reserve}
           </button>
         </div>
       </section>
