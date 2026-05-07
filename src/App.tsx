@@ -1987,7 +1987,9 @@ function SettingsView({
           />
           <SettingRow icon={PauseCircle} label={copy.settings.userStatus} value={userStatus === "paused" ? copy.paused.paused : copy.paused.active} />
           <SettingRow icon={CreditCard} label={copy.settings.billingStatus} value={billingStatusLabel(subscriptionStatus, copy)} />
-          <SettingRow icon={Clock3} label={copy.settings.trialPeriod} value={trialPeriodLabel(trialStartedAt, trialEnd, copy)} />
+          {subscriptionStatus === "trialing" && (
+            <SettingRow icon={Clock3} label={copy.settings.trialPeriod} value={trialPeriodLabel(trialStartedAt, trialEnd, copy)} />
+          )}
         </div>
         <div className="button-row">
           {canStartCheckout && (
