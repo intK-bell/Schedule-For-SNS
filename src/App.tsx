@@ -119,6 +119,7 @@ const uiText: Record<LocaleCode, any> = {
       period: (start: string, end: string) => `開始 ${start} / 終了 ${end}`,
       unset: "未設定",
       checkout: "今すぐ登録",
+      checkoutLoading: "遷移中...",
       portal: "支払い方法を変更",
       expiredTitle: "無料トライアルが終了しました",
       expiredBody: (period: string) => `${period}。予約作成、編集、投稿実行、分析取得には月額390円の登録が必要です。`,
@@ -256,6 +257,7 @@ const uiText: Record<LocaleCode, any> = {
       pauseConfirm: "休止するとStripeサブスクリプションを停止し、未投稿の予約はキャンセルされ、再開しても自動復活しません。再開後の利用には再登録が必要です。Threads本体の投稿は削除されません。休止しますか？",
       deleteConfirm: "退会すると本アプリ上の未投稿予約をキャンセルし、投稿済み記録、投稿本文、分析データ、Threads連携情報を削除します。Threads本体の投稿は削除されません。退会しますか？",
       deleteFailed: "退会処理に失敗しました",
+      checkoutConfirm: "登録すると無料トライアルは終了します。よろしいですか？",
       checkoutFailed: "Checkoutの開始に失敗しました",
       contentRequired: "投稿本文を入力してください",
       scheduleFailed: "予約に失敗しました",
@@ -289,6 +291,7 @@ const uiText: Record<LocaleCode, any> = {
       period: (start: string, end: string) => `Start ${start} / End ${end}`,
       unset: "Not set",
       checkout: "Subscribe now",
+      checkoutLoading: "Redirecting...",
       portal: "Update payment method",
       expiredTitle: "Your free trial has ended",
       expiredBody: (period: string) => `${period}. Scheduling, editing, publishing, and analytics require the ¥390/month plan.`,
@@ -426,6 +429,7 @@ const uiText: Record<LocaleCode, any> = {
       pauseConfirm: "Pausing will stop the Stripe subscription, cancel pending schedules, and they will not be restored automatically after resume. Resuming use requires subscribing again. Posts on Threads are not deleted. Continue?",
       deleteConfirm: "Deleting your account will cancel this app's pending schedules and remove posted records, post text, analytics data, and Threads connection data. Posts on Threads are not deleted. Continue?",
       deleteFailed: "Failed to delete account",
+      checkoutConfirm: "Subscribing will end your free trial. Continue?",
       checkoutFailed: "Failed to start Checkout",
       contentRequired: "Enter post text",
       scheduleFailed: "Failed to schedule",
@@ -613,6 +617,7 @@ function App() {
   const [trialStartedAt, setTrialStartedAt] = useState<number | null>(null);
   const [trialEnd, setTrialEnd] = useState<number | null>(null);
   const [hasSubscriptionEntitlement, setHasSubscriptionEntitlement] = useState(true);
+  const [isStartingCheckout, setIsStartingCheckout] = useState(false);
   const canStartCheckout = subscriptionStatus !== "active";
   const userTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
@@ -735,18 +740,33 @@ function App() {
   };
 
   const startCheckout = async () => {
-    const res = await fetch(`${apiBaseUrl}/billing/checkout`, {
-      method: "POST",
-      credentials: "include",
+    if (isStartingCheckout) return;
+    const confirmed = window.confirm(copy.alerts.checkoutConfirm);
+    if (!confirmed) return;
+
+    setIsStartingCheckout(true);
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      alert(data.message ?? copy.alerts.checkoutFailed);
-      return;
-    }
+    try {
+      const res = await fetch(`${apiBaseUrl}/billing/checkout`, {
+        method: "POST",
+        credentials: "include",
+      });
 
-    window.location.href = data.checkout_url;
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.message ?? copy.alerts.checkoutFailed);
+        setIsStartingCheckout(false);
+        return;
+      }
+
+      window.location.href = data.checkout_url;
+    } catch {
+      alert(copy.alerts.checkoutFailed);
+      setIsStartingCheckout(false);
+    }
   };
 
   const openBillingPortal = async () => {
@@ -1203,8 +1223,8 @@ function App() {
           <strong>{billingLabel(displaySubscriptionStatus, trialEnd, copy)}</strong>
           <small>{trialPeriodLabel(trialStartedAt, trialEnd, copy)}</small>
           {canStartCheckout && (
-            <button className="button secondary" onClick={() => void startCheckout()}>
-              {copy.billing.checkout}
+            <button className="button secondary" disabled={isStartingCheckout} onClick={() => void startCheckout()}>
+              {isStartingCheckout ? copy.billing.checkoutLoading : copy.billing.checkout}
             </button>
           )}
         </div>
@@ -1234,8 +1254,8 @@ function App() {
               <strong>{copy.billing.expiredTitle}</strong>
               <span>{copy.billing.expiredBody(trialPeriodLabel(trialStartedAt, trialEnd, copy))}</span>
             </div>
-            <button className="button dark" onClick={() => void startCheckout()}>
-              {copy.billing.checkout}
+            <button className="button dark" disabled={isStartingCheckout} onClick={() => void startCheckout()}>
+              {isStartingCheckout ? copy.billing.checkoutLoading : copy.billing.checkout}
             </button>
           </section>
         )}
@@ -1308,6 +1328,7 @@ function App() {
             settingsTimezone={settingsTimezone}
             canStartCheckout={canStartCheckout}
             copy={copy}
+            isStartingCheckout={isStartingCheckout}
             subscriptionStatus={displaySubscriptionStatus}
             trialStartedAt={trialStartedAt}
             trialEnd={trialEnd}
@@ -1900,6 +1921,7 @@ function SettingsView({
   settingsTimezone,
   canStartCheckout,
   copy,
+  isStartingCheckout,
   subscriptionStatus,
   trialStartedAt,
   trialEnd,
@@ -1919,6 +1941,7 @@ function SettingsView({
   settingsTimezone: string;
   canStartCheckout: boolean;
   copy: typeof uiText.ja;
+  isStartingCheckout: boolean;
   subscriptionStatus: SubscriptionStatus;
   trialStartedAt: number | null;
   trialEnd: number | null;
@@ -1993,9 +2016,9 @@ function SettingsView({
         </div>
         <div className="button-row">
           {canStartCheckout && (
-            <button className="button primary" onClick={() => void onStartCheckout()}>
+            <button className="button primary" disabled={isStartingCheckout} onClick={() => void onStartCheckout()}>
               <CreditCard size={16} />
-              {copy.billing.checkout}
+              {isStartingCheckout ? copy.billing.checkoutLoading : copy.billing.checkout}
             </button>
           )}
           {canManagePaidAccount && (
