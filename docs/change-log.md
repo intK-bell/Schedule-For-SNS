@@ -985,6 +985,32 @@ DynamoDB Scanの本番リスクについて、dev/MVPで許容する範囲と本
 
 `npm run build` 成功
 
+## 2026-05-08 JST（続き）
+
+### 追加
+
+favicon用の `favicon-32.png`、`favicon-512.png`、`apple-touch-icon.png` を追加
+
+`index.html` にfaviconとApple touch iconのlinkタグを追加
+
+ログイン判定中の画面を、ブランド表示とローディングバー付きの中央配置UIへ変更
+
+予約確認と予約送信のボタンに送信中状態を追加
+
+### 変更
+
+予約編集中の投稿を削除した場合、編集状態、確認ダイアログ、ドラフトをリセットするように変更
+
+予約確認・予約送信中の表示文言を `Loading...` ではなく `送信中...` / `Sending...` に変更
+
+Microsoft Clarityは `VITE_CLARITY_PROJECT_ID` が設定され、かつホスト名が `s4s.aokigk.com` の場合だけ読み込むように変更
+
+設定画面のトライアル期間Rowは、課金状態が `trialing` の場合だけ表示するように変更
+
+### 検証
+
+`npm run build` 成功
+
 ## 2026-05-07 JST（続き4）
 
 ### 変更
@@ -998,5 +1024,17 @@ DynamoDB Scanの本番リスクについて、dev/MVPで許容する範囲と本
 ### 検証
 
 `python3 -m py_compile backend/app/handlers/api.py` 成功
+
+`npm run build` 成功
+
+## 2026-05-08 JST（続き2）
+
+### 変更
+
+Stripe Checkout開始前に、登録すると無料トライアルが終了する旨の確認ダイアログを表示するように変更
+
+Checkout作成中は登録ボタンを `遷移中...` / `Redirecting...` 表示に切り替え、二重押しできないように変更
+
+### 検証
 
 `npm run build` 成功
