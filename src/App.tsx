@@ -158,7 +158,7 @@ const uiText: Record<LocaleCode, any> = {
     calendar: {
       eyebrow: "Calendar",
       title: "日付を選択",
-      slots: (remaining: number) => `${remaining}/3 枠`,
+      slots: (remaining: number) => `残 ${remaining}/3 枠`,
       monthLabel: "表示月",
       dayCount: (count: number) => `${count} 件`,
       selectedDay: "選択日の予約",
@@ -330,7 +330,7 @@ const uiText: Record<LocaleCode, any> = {
     calendar: {
       eyebrow: "Calendar",
       title: "Choose a date",
-      slots: (remaining: number) => `${remaining}/3 slots`,
+      slots: (remaining: number) => `${remaining}/3 slots left`,
       monthLabel: "Month",
       dayCount: (count: number) => `${count} posts`,
       selectedDay: "Selected date",
