@@ -13,7 +13,6 @@ import {
   PauseCircle,
   RefreshCcw,
   Settings,
-  ShieldCheck,
   Trash2,
   Wrench,
   XCircle
@@ -633,7 +632,8 @@ function App() {
   const [trialEnd, setTrialEnd] = useState<number | null>(null);
   const [hasSubscriptionEntitlement, setHasSubscriptionEntitlement] = useState(true);
   const [isStartingCheckout, setIsStartingCheckout] = useState(false);
-  const canStartCheckout = subscriptionStatus !== "active";
+  const isPaused = userStatus === "paused";
+  const canStartCheckout = subscriptionStatus !== "active" && !isPaused;
   const userTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
   const [settingsTimezone, setSettingsTimezone] = useState(userTimezone);
@@ -758,17 +758,10 @@ function App() {
     if (isStartingCheckout) return;
     const confirmed = window.confirm(copy.alerts.checkoutConfirm);
     if (!confirmed) return;
-<<<<<<< HEAD
-
     setIsStartingCheckout(true);
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve());
     });
-
-=======
-
-    setIsStartingCheckout(true);
->>>>>>> dev
     try {
       const res = await fetch(`${apiBaseUrl}/billing/checkout`, {
         method: "POST",
@@ -939,7 +932,7 @@ function App() {
     await fetchScheduledPosts();
 
     return Boolean(data.has_subscription_entitlement ?? false) || data.subscription_status === "active";
-  }, [apiBaseUrl, applyCurrentUser, fetchScheduledPosts]);
+  }, [apiBaseUrl, applyCurrentUser, fetchScheduledPosts, setIsLoggedIn]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1005,7 +998,10 @@ function App() {
 
   useEffect(() => {
     if (isDeveloper && view === "developer" && !developerDashboard && !developerLoading) {
-      void fetchDeveloperDashboard();
+      const timeoutId = window.setTimeout(() => {
+        void fetchDeveloperDashboard();
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
     }
   }, [developerDashboard, developerLoading, fetchDeveloperDashboard, isDeveloper, view]);
 
@@ -1308,7 +1304,7 @@ function App() {
           </div>
         </header>
 
-        {!hasEffectiveSubscriptionEntitlement && (
+        {!isPaused && !hasEffectiveSubscriptionEntitlement && (
           <section className="dialog-banner danger">
             <CreditCard size={20} />
             <div>
@@ -1335,15 +1331,15 @@ function App() {
           </section>
         )}
 
-        {userStatus === "paused" && (
+        {isPaused && (
           <section className="dialog-banner">
             <PauseCircle size={20} />
             <div>
               <strong>{copy.paused.title}</strong>
               <span>{copy.paused.body}</span>
             </div>
-            <button className="button dark" onClick={() => void changeAccountStatus("active")}>
-              {copy.paused.resume}
+            <button className="button dark" disabled={isStartingCheckout} onClick={() => void startCheckout()}>
+              {isStartingCheckout ? copy.billing.checkoutLoading : copy.paused.resume}
             </button>
           </section>
         )}
@@ -1390,6 +1386,7 @@ function App() {
             canStartCheckout={canStartCheckout}
             copy={copy}
             isStartingCheckout={isStartingCheckout}
+            isPaused={isPaused}
             subscriptionStatus={displaySubscriptionStatus}
             trialStartedAt={trialStartedAt}
             trialEnd={trialEnd}
@@ -1983,6 +1980,7 @@ function SettingsView({
   canStartCheckout,
   copy,
   isStartingCheckout,
+  isPaused,
   subscriptionStatus,
   trialStartedAt,
   trialEnd,
@@ -2003,6 +2001,7 @@ function SettingsView({
   canStartCheckout: boolean;
   copy: typeof uiText.ja;
   isStartingCheckout: boolean;
+  isPaused: boolean;
   subscriptionStatus: SubscriptionStatus;
   trialStartedAt: number | null;
   trialEnd: number | null;
@@ -2080,6 +2079,12 @@ function SettingsView({
             <button className="button primary" disabled={isStartingCheckout} onClick={() => void onStartCheckout()}>
               <CreditCard size={16} />
               {isStartingCheckout ? copy.billing.checkoutLoading : copy.billing.checkout}
+            </button>
+          )}
+          {isPaused && (
+            <button className="button primary" disabled={isStartingCheckout} onClick={() => void onStartCheckout()}>
+              <PauseCircle size={16} />
+              {isStartingCheckout ? copy.billing.checkoutLoading : copy.paused.resume}
             </button>
           )}
           {canManagePaidAccount && (

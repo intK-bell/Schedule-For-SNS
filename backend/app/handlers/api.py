@@ -292,6 +292,8 @@ def persist_stripe_subscription(
         user_updates["stripe_trial_end"] = int(trial_end)
     if status in TRIAL_ENDING_SUBSCRIPTION_STATUSES:
         user_updates.update(end_app_trial_for_account(app_user_id, now, "subscribed"))
+    if status == "active":
+        user_updates["user_status"] = "active"
 
     write_user(app_user_id, {key: value for key, value in user_updates.items() if value})
 
