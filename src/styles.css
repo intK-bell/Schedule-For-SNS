@@ -213,10 +213,13 @@ select,
 input,
 textarea {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid var(--s4s-line);
   border-radius: var(--s4s-radius);
   background: #fff;
   color: var(--s4s-text);
+  font-size: 16px;
 }
 
 select,
@@ -646,6 +649,10 @@ textarea {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.form-grid label {
+  min-width: 0;
 }
 
 label {
