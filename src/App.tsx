@@ -8,6 +8,7 @@ import {
   Edit3,
   FileText,
   Globe2,
+  HelpCircle,
   LogOut,
   Menu,
   PauseCircle,
@@ -2010,6 +2011,7 @@ function SettingsView({
   userStatus: UserStatus;
 }) {
   const canManagePaidAccount = subscriptionStatus === "active";
+  const [selectedHelp, setSelectedHelp] = useState<"pause" | "delete" | null>(null);
 
   return (
     <div className="settings-layout">
@@ -2102,19 +2104,20 @@ function SettingsView({
                 <PauseCircle size={16} />
                 {userStatus === "paused" ? copy.paused.resume : copy.paused.pause}
               </button>
+              <button className="help-button" title={copy.settings.pauseNote} onClick={() => setSelectedHelp("pause")}>
+                <HelpCircle size={16} />
+              </button>
+              <span className="action-separator" aria-hidden="true" />
               <button className="button danger" onClick={() => void onDeleteAccount()}>
                 <Trash2 size={16} />
                 {copy.settings.delete}
               </button>
+              <button className="help-button" title={copy.settings.deleteNote} onClick={() => setSelectedHelp("delete")}>
+                <HelpCircle size={16} />
+              </button>
             </>
           )}
         </div>
-        {canManagePaidAccount && (
-          <div className="account-action-notes">
-            <p>{copy.settings.pauseNote}</p>
-            <p>{copy.settings.deleteNote}</p>
-          </div>
-        )}
       </section>
       <section className="panel">
         <div className="section-heading">
@@ -2135,6 +2138,13 @@ function SettingsView({
           </button>
         </div>
       </section>
+      {selectedHelp && (
+        <AccountActionHelpDialog
+          copy={copy}
+          kind={selectedHelp}
+          onClose={() => setSelectedHelp(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2240,6 +2250,33 @@ function DeveloperView({
               </div>
             </article>
           ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AccountActionHelpDialog({
+  copy,
+  kind,
+  onClose
+}: {
+  copy: typeof uiText.ja;
+  kind: "pause" | "delete";
+  onClose: () => void;
+}) {
+  const title = kind === "pause" ? copy.paused.pause : copy.settings.delete;
+  const body = kind === "pause" ? copy.settings.pauseNote : copy.settings.deleteNote;
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="account-action-help-title">
+        <h2 id="account-action-help-title">{title}</h2>
+        <p className="help-modal-text">{body.replace(/^[^:]+:\s*/, "")}</p>
+        <div className="button-row end">
+          <button className="button secondary" onClick={onClose}>
+            {copy.settings.close}
+          </button>
         </div>
       </section>
     </div>

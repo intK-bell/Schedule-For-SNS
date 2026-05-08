@@ -209,6 +209,28 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.help-button {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--s4s-line);
+  border-radius: var(--s4s-radius);
+  background: #fff;
+  color: var(--s4s-muted);
+}
+
+.help-button:hover {
+  border-color: var(--s4s-primary);
+  color: var(--s4s-primary-dark);
+}
+
+.action-separator {
+  width: 1px;
+  height: 28px;
+  background: var(--s4s-line);
+}
+
 select,
 input,
 textarea {
@@ -846,6 +868,12 @@ label.wide {
   white-space: pre-wrap;
   color: var(--s4s-text);
   line-height: 1.65;
+}
+
+.help-modal-text {
+  margin: 0;
+  color: var(--s4s-text);
+  line-height: 1.7;
 }
 
 .modal-backdrop {
