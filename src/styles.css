@@ -209,26 +209,33 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.action-with-help {
+  position: relative;
+  display: inline-flex;
+}
+
+.action-with-help > .button {
+  padding-right: 24px;
+}
+
 .help-button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
   display: inline-grid;
-  width: 38px;
-  height: 38px;
+  width: 24px;
+  height: 24px;
   place-items: center;
   border: 1px solid var(--s4s-line);
-  border-radius: var(--s4s-radius);
+  border-radius: 999px;
   background: #fff;
   color: var(--s4s-muted);
+  box-shadow: 0 6px 16px rgb(15 31 46 / 12%);
 }
 
 .help-button:hover {
   border-color: var(--s4s-primary);
   color: var(--s4s-primary-dark);
-}
-
-.action-separator {
-  width: 1px;
-  height: 28px;
-  background: var(--s4s-line);
 }
 
 select,

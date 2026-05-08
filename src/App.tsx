@@ -2097,24 +2097,27 @@ function SettingsView({
                 <CreditCard size={16} />
                 {copy.billing.portal}
               </button>
-              <button
-                className="button secondary"
-                onClick={() => void onStatusChange(userStatus === "paused" ? "active" : "paused")}
-              >
-                <PauseCircle size={16} />
-                {userStatus === "paused" ? copy.paused.resume : copy.paused.pause}
-              </button>
-              <button className="help-button" title={copy.settings.pauseNote} onClick={() => setSelectedHelp("pause")}>
-                <HelpCircle size={16} />
-              </button>
-              <span className="action-separator" aria-hidden="true" />
-              <button className="button danger" onClick={() => void onDeleteAccount()}>
-                <Trash2 size={16} />
-                {copy.settings.delete}
-              </button>
-              <button className="help-button" title={copy.settings.deleteNote} onClick={() => setSelectedHelp("delete")}>
-                <HelpCircle size={16} />
-              </button>
+              <div className="action-with-help">
+                <button
+                  className="button secondary"
+                  onClick={() => void onStatusChange(userStatus === "paused" ? "active" : "paused")}
+                >
+                  <PauseCircle size={16} />
+                  {userStatus === "paused" ? copy.paused.resume : copy.paused.pause}
+                </button>
+                <button className="help-button" title={copy.settings.pauseNote} onClick={() => setSelectedHelp("pause")}>
+                  <HelpCircle size={14} />
+                </button>
+              </div>
+              <div className="action-with-help">
+                <button className="button danger" onClick={() => void onDeleteAccount()}>
+                  <Trash2 size={16} />
+                  {copy.settings.delete}
+                </button>
+                <button className="help-button" title={copy.settings.deleteNote} onClick={() => setSelectedHelp("delete")}>
+                  <HelpCircle size={14} />
+                </button>
+              </div>
             </>
           )}
         </div>
