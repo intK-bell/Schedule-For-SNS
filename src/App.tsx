@@ -754,10 +754,12 @@ function App() {
     window.location.reload();
   };
 
-  const startCheckout = async () => {
+  const startCheckout = async (options: { skipConfirm?: boolean } = {}) => {
     if (isStartingCheckout) return;
-    const confirmed = window.confirm(copy.alerts.checkoutConfirm);
-    if (!confirmed) return;
+    if (!options.skipConfirm) {
+      const confirmed = window.confirm(copy.alerts.checkoutConfirm);
+      if (!confirmed) return;
+    }
     setIsStartingCheckout(true);
     await new Promise<void>((resolve) => {
       window.requestAnimationFrame(() => resolve());
@@ -1338,7 +1340,7 @@ function App() {
               <strong>{copy.paused.title}</strong>
               <span>{copy.paused.body}</span>
             </div>
-            <button className="button dark" disabled={isStartingCheckout} onClick={() => void startCheckout()}>
+            <button className="button dark" disabled={isStartingCheckout} onClick={() => void startCheckout({ skipConfirm: true })}>
               {isStartingCheckout ? copy.billing.checkoutLoading : copy.paused.resume}
             </button>
           </section>
@@ -1993,7 +1995,7 @@ function SettingsView({
   onOpenLegalDocument: (document: LegalDocument) => void;
   onReconnect: () => void;
   onSaveSettings: (nextLocale?: string, nextTimezone?: string) => Promise<void>;
-  onStartCheckout: () => Promise<void>;
+  onStartCheckout: (options?: { skipConfirm?: boolean }) => Promise<void>;
   onStatusChange: (nextStatus: "active" | "paused") => Promise<void>;
   setLocale: (locale: string) => void;
   setSettingsTimezone: (timezone: string) => void;
@@ -2082,7 +2084,7 @@ function SettingsView({
             </button>
           )}
           {isPaused && (
-            <button className="button primary" disabled={isStartingCheckout} onClick={() => void onStartCheckout()}>
+            <button className="button primary" disabled={isStartingCheckout} onClick={() => void onStartCheckout({ skipConfirm: true })}>
               <PauseCircle size={16} />
               {isStartingCheckout ? copy.billing.checkoutLoading : copy.paused.resume}
             </button>
